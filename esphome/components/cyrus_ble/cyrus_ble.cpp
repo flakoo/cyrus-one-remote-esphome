@@ -123,6 +123,8 @@ void CyrusBleComponent::brightness_down() {
 void CyrusBleComponent::loop() {
   if (state_ == State::IDLE) {
     led_indicator_.start_boot();
+    // Always-on relay: never stay idle.
+    start_scanning("idle recovery");
   }
   led_indicator_.loop();
 
@@ -218,8 +220,9 @@ void CyrusBleComponent::nimble_host_task(void *param) {
 
 void CyrusBleComponent::sync_cb() {
   ESP_LOGI(TAG, "NimBLE host synced");
-  if (instance() != nullptr && instance()->state_ == State::SCANNING) {
-    instance()->start_scan_if_synced();
+  if (instance() != nullptr) {
+    // The relay is always-on: start scanning right after boot.
+    instance()->start_scanning("boot");
   }
 }
 
@@ -439,10 +442,10 @@ void CyrusBleComponent::enqueue_state_refresh() {
 // ------------------------------------------------------------------
 
 void CyrusBleComponent::on_scan_timeout() {
-  ESP_LOGW(TAG, "Scan timeout (%lu ms), giving up", SCAN_TIMEOUT_MS);
+  // Normal state when the amp is off: keep listening indefinitely.
+  ESP_LOGD(TAG, "Scan window elapsed, restarting (amp likely off)");
   scanner_.stop();
-  state_ = State::IDLE;
-  publish_status(false);
+  start_scanning("rescan");
 }
 
 void CyrusBleComponent::on_mac_b_timeout() {
