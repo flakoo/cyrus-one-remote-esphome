@@ -1,0 +1,87 @@
+# Home Assistant package: power-on volume init for a Cyrus ONE / ONE HD
+# amplifier controlled through an ESP32 running the firmware from the
+# `esphome/` directory of this repository.
+#
+# The amplifier is powered through any smart plug integrated into HA
+# (Shelly, TP-Link, Zigbee, ...). The plug entity is the ONLY thing you need
+# to adjust - replace `switch.amplifier_plug` everywhere in this file.
+#
+# All day-to-day control entities (volume slider, source select, mute, ...)
+# come from the ESPHome integration automatically once the ESP32 is added to
+# Home Assistant. This package only covers the power-on flow:
+#
+#   plug on -> ESP32 scans for the amp (two-MAC boot sequence) -> connects ->
+#   writes the startup volume -> stays connected as the BLE relay ->
+#   `binary_sensor.<device>_cyrus_volume_set` pulses on success.
+#
+# Include this file from configuration.yaml, e.g.:
+#   homeassistant:
+#     packages: !include_dir_named packages
+# and place this file as packages/cyrus_remote.yaml.
+
+# Absolute startup volume 0-90 (36 = roughly -40 dB on the Cyrus scale).
+# Change this to taste.
+input_number:
+  cyrus_startup_volume:
+    name: "Cyrus startup volume"
+    min: 0
+    max: 90
+    step: 1
+    initial: 36
+    icon: mdi:volume-high
+
+# Single switch to turn the amplifier on/off from the UI.
+# Power-off just cuts the plug; power-on runs the volume script below.
+template:
+  - switch:
+      - name: "Cyrus Amp"
+        unique_id: cyrus_amp_power_switch
+        state: "{{ is_state('switch.amplifier_plug', 'on') }}"
+        availability: "{{ states('switch.amplifier_plug') not in ['unknown', 'unavailable'] }}"
+        turn_on:
+          - service: script.cyrus_amp_turn_on_with_volume
+        turn_off:
+          - service: switch.turn_off
+            target:
+              entity_id: switch.amplifier_plug
+
+automation:
+  # Covers the case where the plug is switched on outside of HA
+  # (physical button on the plug, vendor app).
+  - alias: "Cyrus amp powered on"
+    id: cyrus_amp_powered_on
+    trigger:
+      - platform: state
+        entity_id: switch.amplifier_plug
+        to: "on"
+    condition:
+      # The script itself turns the plug on; don't run twice.
+      - condition: state
+        entity_id: script.cyrus_amp_turn_on_with_volume
+        state: "off"
+    action:
+      - service: script.cyrus_amp_turn_on_with_volume
+
+script:
+  cyrus_amp_turn_on_with_volume:
+    alias: "Turn on Cyrus amp and set volume"
+    mode: single
+    sequence:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.amplifier_plug
+      # The ESP32 scans for the two MAC advertisements of the amplifier,
+      # connects over BLE, writes the volume and stays connected. It pulses
+      # binary_sensor.<device>_cyrus_volume_set when done
+      # (normally ~8 s after power-on; 30 s timeout as a safety net).
+      # NOTE: replace `cyrus_remote` with your ESPHome device name if you
+      # changed it in esphome/cyrus-remote.yaml.
+      - service: esphome.cyrus_remote_set_startup_volume
+        data:
+          volume: "{{ states('input_number.cyrus_startup_volume') | int }}"
+      - wait_for_trigger:
+          - platform: state
+            entity_id: binary_sensor.cyrus_remote_cyrus_volume_set
+            to: "on"
+        timeout: "30"
+        continue_on_timeout: true

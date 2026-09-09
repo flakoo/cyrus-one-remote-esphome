@@ -1,0 +1,282 @@
+# ESPHome firmware for the Cyrus ONE / ONE HD BLE relay (M5Stack Atom S3U).
+#
+# The ESP32 scans for the amplifier (BLE name prefix "ONE-"), waits for the
+# two-stage boot MAC sequence, connects, writes the startup volume requested
+# by Home Assistant, and then STAYS CONNECTED, acting as a permanent BLE
+# relay: amp state (volume, source, mute, ...) is published as ESPHome
+# entities and control commands from HA are forwarded over BLE.
+#
+# Copy secrets.yaml.example to secrets.yaml and fill in your values before
+# compiling.
+
+esphome:
+  name: cyrus-remote
+  friendly_name: Cyrus Remote
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    version: 5.5.5
+    sdkconfig_options:
+      CONFIG_BT_ENABLED: "y"
+      CONFIG_BT_NIMBLE_ENABLED: "y"
+      CONFIG_BT_NIMBLE_ROLE_CENTRAL: "y"
+      CONFIG_BT_NIMBLE_ROLE_PERIPHERAL: "n"
+      CONFIG_BT_NIMBLE_MAX_CONNECTIONS: "1"
+      CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE: "7168"
+      CONFIG_BT_NIMBLE_NVS_PERSIST_ENABLE: "n"
+
+logger:
+  level: INFO
+  hardware_uart: USB_CDC
+
+api:
+  encryption:
+    key: !secret api_key
+  actions:
+    # Power-on path: scan, connect, write startup volume (0-90), stay connected.
+    - action: set_startup_volume
+      variables:
+        volume: int
+      then:
+        - lambda: |-
+            id(cyrus_ble_device)->request_volume(volume);
+    # Control actions (require the amp link to be up).
+    - action: cyrus_set_volume
+      variables:
+        volume: int
+      then:
+        - lambda: |-
+            id(cyrus_ble_device)->set_volume(volume);
+    - action: cyrus_set_mute
+      variables:
+        muted: bool
+      then:
+        - lambda: |-
+            id(cyrus_ble_device)->set_mute(muted);
+    - action: cyrus_set_av_direct
+      variables:
+        enabled: bool
+      then:
+        - lambda: |-
+            id(cyrus_ble_device)->set_av_direct(enabled);
+    - action: cyrus_set_balance
+      variables:
+        balance: int
+      then:
+        - lambda: |-
+            id(cyrus_ble_device)->set_balance(balance);
+    - action: cyrus_set_source
+      variables:
+        source: string
+      then:
+        - lambda: |-
+            id(cyrus_ble_device)->set_source(source);
+    - action: cyrus_brightness_up
+      then:
+        - lambda: |-
+            id(cyrus_ble_device)->brightness_up();
+    - action: cyrus_brightness_down
+      then:
+        - lambda: |-
+            id(cyrus_ble_device)->brightness_down();
+  on_client_connected:
+    then:
+      - lambda: |-
+          id(cyrus_ble_device)->on_ha_connected();
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: Cyrus Remote Fallback
+    password: !secret fallback_hotspot_password
+
+captive_portal:
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [cyrus_ble]
+
+binary_sensor:
+  # Legacy pulse: ON for 500 ms after the startup volume write. The HA
+  # power-on automation waits for this.
+  - platform: template
+    id: cyrus_volume_set
+    name: "Cyrus Volume Set"
+  - platform: template
+    id: cyrus_connected
+    name: "Cyrus Connected"
+    device_class: connectivity
+  - platform: template
+    id: cyrus_ready
+    name: "Cyrus Ready"
+    device_class: running
+  - platform: template
+    id: cyrus_muted
+    name: "Cyrus Muted"
+  - platform: template
+    id: cyrus_headphones
+    name: "Cyrus Headphones"
+  - platform: template
+    id: cyrus_av_direct
+    name: "Cyrus AV Direct"
+
+sensor:
+  - platform: template
+    id: cyrus_volume
+    name: "Cyrus Volume"
+    icon: mdi:volume-high
+  - platform: template
+    id: cyrus_balance
+    name: "Cyrus Balance"
+
+text_sensor:
+  - platform: template
+    id: cyrus_source
+    name: "Cyrus Source"
+  - platform: template
+    id: cyrus_model
+    name: "Cyrus Model"
+  - platform: template
+    id: cyrus_sw_version
+    name: "Cyrus SW Version"
+  - platform: template
+    id: cyrus_serial
+    name: "Cyrus Serial"
+
+cyrus_ble:
+  id: cyrus_ble_device
+  status_sensor: cyrus_volume_set
+  connected_sensor: cyrus_connected
+  ready_sensor: cyrus_ready
+  muted_sensor: cyrus_muted
+  headphones_sensor: cyrus_headphones
+  av_direct_sensor: cyrus_av_direct
+  volume_sensor: cyrus_volume
+  balance_sensor: cyrus_balance
+  source_sensor: cyrus_source
+  model_sensor: cyrus_model
+  sw_version_sensor: cyrus_sw_version
+  serial_sensor: cyrus_serial
+  led: light_esp32_rmt_led_strip_1
+
+# --- HA-facing controls ------------------------------------------------------
+# These show up in Home Assistant as native entities (slider, dropdown,
+# switches) via the standard ESPHome integration - no custom HA code needed.
+
+number:
+  # Volume exposed as 0-100 % with the amp's non-linear characteristic
+  # applied (curve factor 15, same as the cyrus-one-hass integration).
+  - platform: template
+    name: "Cyrus Volume"
+    id: cyrus_volume_number
+    icon: mdi:volume-high
+    min_value: 0
+    max_value: 100
+    step: 1
+    optimistic: false
+    lambda: |-
+      const float v = id(cyrus_volume).state;
+      if (isnan(v)) return 0.0f;
+      return (powf(15.0f, v / 90.0f) - 1.0f) / 14.0f * 100.0f;
+    set_action:
+      lambda: |-
+        const float ratio = (x / 100.0f) * 14.0f + 1.0f;
+        id(cyrus_ble_device)->set_volume((int) roundf(90.0f * logf(ratio) / logf(15.0f)));
+  - platform: template
+    name: "Cyrus Balance"
+    id: cyrus_balance_number
+    min_value: 0
+    max_value: 90
+    step: 1
+    optimistic: false
+    lambda: |-
+      return isnan(id(cyrus_balance).state) ? 45.0f : id(cyrus_balance).state;
+    set_action:
+      lambda: |-
+        id(cyrus_ble_device)->set_balance((int) x);
+
+select:
+  # Union of Cyrus ONE and ONE HD inputs; the component maps the name to the
+  # model-specific index and ignores sources the model does not have.
+  - platform: template
+    name: "Cyrus Source"
+    id: cyrus_source_select
+    icon: mdi:import
+    optimistic: false
+    options:
+      - Bluetooth
+      - Phono
+      - AUX 3
+      - AUX 4
+      - AUX 5
+      - AUX 6
+      - AUX 7
+      - AV
+      - USB
+      - Optical
+      - SPDIF
+    lambda: |-
+      return id(cyrus_source).state;
+    set_action:
+      lambda: |-
+        id(cyrus_ble_device)->set_source(x);
+
+switch:
+  - platform: template
+    name: "Cyrus Mute"
+    id: cyrus_mute_switch
+    icon: mdi:volume-off
+    lambda: |-
+      return id(cyrus_muted).state;
+    turn_on_action:
+      lambda: |-
+        id(cyrus_ble_device)->set_mute(true);
+    turn_off_action:
+      lambda: |-
+        id(cyrus_ble_device)->set_mute(false);
+  - platform: template
+    name: "Cyrus AV Direct"
+    id: cyrus_av_direct_switch
+    lambda: |-
+      return id(cyrus_av_direct).state;
+    turn_on_action:
+      lambda: |-
+        id(cyrus_ble_device)->set_av_direct(true);
+    turn_off_action:
+      lambda: |-
+        id(cyrus_ble_device)->set_av_direct(false);
+
+button:
+  - platform: template
+    name: "Cyrus Brightness Up"
+    on_press:
+      lambda: |-
+        id(cyrus_ble_device)->brightness_up();
+  - platform: template
+    name: "Cyrus Brightness Down"
+    on_press:
+      lambda: |-
+        id(cyrus_ble_device)->brightness_down();
+
+# Status LED of the M5Stack Atom S3U (WS2812, GPIO35 on this board).
+light:
+  - platform: esp32_rmt_led_strip
+    channel_colors: GRB
+    name: Status LED
+    id: light_esp32_rmt_led_strip_1
+    internal: true
+    pin: GPIO35
+    chipset: WS2812
+    num_leds: 1
+    rmt_symbols: 48
+    restore_mode: RESTORE_DEFAULT_OFF
