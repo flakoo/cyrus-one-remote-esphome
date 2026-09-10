@@ -123,22 +123,12 @@ binary_sensor:
   - platform: template
     id: cyrus_muted
     name: "Cyrus Muted"
-    on_state:
-      then:
-        - switch.template.publish:
-            id: cyrus_mute_switch
-            state: !lambda 'return id(cyrus_muted).state;'
   - platform: template
     id: cyrus_headphones
     name: "Cyrus Headphones"
   - platform: template
     id: cyrus_av_direct
     name: "Cyrus AV Direct"
-    on_state:
-      then:
-        - switch.template.publish:
-            id: cyrus_av_direct_switch
-            state: !lambda 'return id(cyrus_av_direct).state;'
 
 sensor:
   - platform: template
@@ -177,11 +167,18 @@ cyrus_ble:
   model_sensor: cyrus_model
   sw_version_sensor: cyrus_sw_version
   serial_sensor: cyrus_serial
+  volume_number: cyrus_volume_number
+  balance_number: cyrus_balance_number
+  source_select: cyrus_source_select
+  mute_switch: cyrus_mute_switch
+  av_direct_switch: cyrus_av_direct_switch
   led: light_esp32_rmt_led_strip_1
 
 # --- HA-facing controls ------------------------------------------------------
 # These show up in Home Assistant as native entities (slider, dropdown,
 # switches) via the standard ESPHome integration - no custom HA code needed.
+# They are optimistic (instant UI feedback) and the cyrus_ble component
+# publishes the real state on every BLE notification - no polling, no revert.
 
 number:
   # Volume exposed as 0-100 % with the amp's non-linear characteristic
@@ -193,12 +190,7 @@ number:
     min_value: 0
     max_value: 100
     step: 1
-    optimistic: false
-    update_interval: 1s
-    lambda: |-
-      const float v = id(cyrus_volume).state;
-      if (isnan(v)) return 0.0f;
-      return (powf(15.0f, v / 90.0f) - 1.0f) / 14.0f * 100.0f;
+    optimistic: true
     set_action:
       lambda: |-
         const float ratio = (x / 100.0f) * 14.0f + 1.0f;
@@ -210,10 +202,7 @@ number:
     min_value: -10
     max_value: 10
     step: 1
-    optimistic: false
-    update_interval: 1s
-    lambda: |-
-      return isnan(id(cyrus_balance).state) ? 0.0f : id(cyrus_balance).state - 10.0f;
+    optimistic: true
     set_action:
       lambda: |-
         id(cyrus_ble_device)->set_balance((int) (x + 10.0f));
@@ -226,8 +215,7 @@ select:
     name: "Cyrus Source"
     id: cyrus_source_select
     icon: mdi:import
-    optimistic: false
-    update_interval: 1s
+    optimistic: true
     options:
       - Bluetooth
       - Phono
@@ -235,11 +223,6 @@ select:
       - AUX 4
       - AUX 5
       - AV
-    lambda: |-
-      if (id(cyrus_source).state.empty()) {
-        return std::optional<std::string>();
-      }
-      return id(cyrus_source).state;
     set_action:
       lambda: |-
         id(cyrus_ble_device)->set_source(x);
@@ -249,8 +232,6 @@ switch:
     name: "Cyrus Mute"
     id: cyrus_mute_switch
     icon: mdi:volume-off
-    lambda: |-
-      return id(cyrus_muted).state;
     turn_on_action:
       lambda: |-
         id(cyrus_ble_device)->set_mute(true);
@@ -260,26 +241,12 @@ switch:
   - platform: template
     name: "Cyrus AV Direct"
     id: cyrus_av_direct_switch
-    lambda: |-
-      return id(cyrus_av_direct).state;
     turn_on_action:
       lambda: |-
         id(cyrus_ble_device)->set_av_direct(true);
     turn_off_action:
       lambda: |-
         id(cyrus_ble_device)->set_av_direct(false);
-
-button:
-  - platform: template
-    name: "Cyrus Brightness Up"
-    on_press:
-      lambda: |-
-        id(cyrus_ble_device)->brightness_up();
-  - platform: template
-    name: "Cyrus Brightness Down"
-    on_press:
-      lambda: |-
-        id(cyrus_ble_device)->brightness_down();
 
 # Status LED of the M5Stack Atom S3U (WS2812, GPIO35 on this board).
 light:

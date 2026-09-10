@@ -4,6 +4,7 @@
 #include "esphome/core/log.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -347,17 +348,29 @@ void CyrusBleComponent::process_notification(const BleNotification &n) {
       apply_bool_payload(n.cmd, n.payload, n.len);
       break;
 
-    case protocol::Cmd::VOLUME:
+    case protocol::Cmd::VOLUME: {
+      const int raw = ascii_payload_to_int(n.payload, n.len);
       if (volume_sensor_ != nullptr) {
-        volume_sensor_->publish_state(ascii_payload_to_int(n.payload, n.len));
+        volume_sensor_->publish_state(raw);
+      }
+      if (volume_number_ != nullptr) {
+        // Non-linear characteristic (curve factor 15), exposed as 0-100 %.
+        const float pct = (powf(15.0f, raw / 90.0f) - 1.0f) / 14.0f * 100.0f;
+        volume_number_->publish_state(pct);
       }
       break;
+    }
 
-    case protocol::Cmd::BALANCE:
+    case protocol::Cmd::BALANCE: {
+      const int raw = ascii_payload_to_int(n.payload, n.len);
       if (balance_sensor_ != nullptr) {
-        balance_sensor_->publish_state(ascii_payload_to_int(n.payload, n.len));
+        balance_sensor_->publish_state(raw);
+      }
+      if (balance_number_ != nullptr) {
+        balance_number_->publish_state(raw - 10.0f);  // amp 0-20, 10 = center
       }
       break;
+    }
 
     case protocol::Cmd::SW_VERSION: {
       if (sw_version_sensor_ != nullptr) {
@@ -383,8 +396,13 @@ void CyrusBleComponent::process_notification(const BleNotification &n) {
       const int index = ascii_payload_to_int(n.payload, n.len) - 1;
       size_t count;
       const char *const *list = source_list(&count);
-      if (source_sensor_ != nullptr && index >= 0 && (size_t)index < count) {
-        source_sensor_->publish_state(list[index]);
+      if (index >= 0 && (size_t)index < count) {
+        if (source_sensor_ != nullptr) {
+          source_sensor_->publish_state(list[index]);
+        }
+        if (source_select_ != nullptr) {
+          source_select_->publish_state(list[index]);
+        }
       }
       break;
     }
@@ -397,15 +415,20 @@ void CyrusBleComponent::process_notification(const BleNotification &n) {
 
 void CyrusBleComponent::apply_bool_payload(uint8_t cmd, const uint8_t *payload, size_t len) {
   const bool on = (len == 1 && payload[0] == '1');
-  esphome::binary_sensor::BinarySensor *s = nullptr;
   switch (cmd) {
-    case protocol::Cmd::MUTE: s = muted_sensor_; break;
-    case protocol::Cmd::AV_DIRECT: s = av_direct_sensor_; break;
-    case protocol::Cmd::HEADPHONE: s = headphones_sensor_; break;
-    default: return;
-  }
-  if (s != nullptr) {
-    s->publish_state(on);
+    case protocol::Cmd::MUTE:
+      if (muted_sensor_ != nullptr) muted_sensor_->publish_state(on);
+      if (mute_switch_ != nullptr) mute_switch_->publish_state(on);
+      break;
+    case protocol::Cmd::AV_DIRECT:
+      if (av_direct_sensor_ != nullptr) av_direct_sensor_->publish_state(on);
+      if (av_direct_switch_ != nullptr) av_direct_switch_->publish_state(on);
+      break;
+    case protocol::Cmd::HEADPHONE:
+      if (headphones_sensor_ != nullptr) headphones_sensor_->publish_state(on);
+      break;
+    default:
+      break;
   }
 }
 

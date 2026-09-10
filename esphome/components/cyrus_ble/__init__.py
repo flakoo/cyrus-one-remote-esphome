@@ -1,6 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import binary_sensor, light, sensor, text_sensor
+from esphome.components import binary_sensor, light, number, select, sensor, switch, text_sensor
 from esphome.const import CONF_ID
 
 DEPENDENCIES = ['binary_sensor']
@@ -22,6 +22,11 @@ CONF_SOURCE_SENSOR = "source_sensor"
 CONF_MODEL_SENSOR = "model_sensor"
 CONF_SW_VERSION_SENSOR = "sw_version_sensor"
 CONF_SERIAL_SENSOR = "serial_sensor"
+CONF_VOLUME_NUMBER = "volume_number"
+CONF_BALANCE_NUMBER = "balance_number"
+CONF_SOURCE_SELECT = "source_select"
+CONF_MUTE_SWITCH = "mute_switch"
+CONF_AV_DIRECT_SWITCH = "av_direct_switch"
 
 _BINARY_SENSORS = {
     CONF_STATUS_SENSOR: "set_status_sensor",
@@ -50,6 +55,11 @@ CONFIG_SCHEMA = cv.Schema({
     **{cv.Optional(k): cv.use_id(binary_sensor.BinarySensor) for k in _BINARY_SENSORS},
     **{cv.Optional(k): cv.use_id(sensor.Sensor) for k in _SENSORS},
     **{cv.Optional(k): cv.use_id(text_sensor.TextSensor) for k in _TEXT_SENSORS},
+    cv.Optional(CONF_VOLUME_NUMBER): cv.use_id(number.Number),
+    cv.Optional(CONF_BALANCE_NUMBER): cv.use_id(number.Number),
+    cv.Optional(CONF_SOURCE_SELECT): cv.use_id(select.Select),
+    cv.Optional(CONF_MUTE_SWITCH): cv.use_id(switch.Switch),
+    cv.Optional(CONF_AV_DIRECT_SWITCH): cv.use_id(switch.Switch),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -75,3 +85,14 @@ async def to_code(config):
         if key in config:
             sens = await cg.get_variable(config[key])
             cg.add(getattr(var, setter)(sens))
+
+    for key, setter, cls in (
+        (CONF_VOLUME_NUMBER, "set_volume_number", number.Number),
+        (CONF_BALANCE_NUMBER, "set_balance_number", number.Number),
+        (CONF_SOURCE_SELECT, "set_source_select", select.Select),
+        (CONF_MUTE_SWITCH, "set_mute_switch", switch.Switch),
+        (CONF_AV_DIRECT_SWITCH, "set_av_direct_switch", switch.Switch),
+    ):
+        if key in config:
+            ent = await cg.get_variable(config[key])
+            cg.add(getattr(var, setter)(ent))

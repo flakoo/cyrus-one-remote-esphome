@@ -5,6 +5,9 @@
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
+#include "esphome/components/number/number.h"
+#include "esphome/components/select/select.h"
+#include "esphome/components/switch/switch.h"
 #include "ble_scanner.h"
 #include "ble_connection.h"
 #include "cyrus_led.h"
@@ -47,6 +50,14 @@ class CyrusBleComponent : public esphome::Component,
   void set_muted_binary_sensor(esphome::binary_sensor::BinarySensor *s) { muted_sensor_ = s; }
   void set_headphones_binary_sensor(esphome::binary_sensor::BinarySensor *s) { headphones_sensor_ = s; }
   void set_av_direct_binary_sensor(esphome::binary_sensor::BinarySensor *s) { av_direct_sensor_ = s; }
+
+  // Control entities: the component publishes their state directly on BLE
+  // notifications (entities are optimistic, no polling needed).
+  void set_volume_number(esphome::number::Number *n) { volume_number_ = n; }
+  void set_balance_number(esphome::number::Number *n) { balance_number_ = n; }
+  void set_source_select(esphome::select::Select *s) { source_select_ = s; }
+  void set_mute_switch(esphome::switch_::Switch *s) { mute_switch_ = s; }
+  void set_av_direct_switch(esphome::switch_::Switch *s) { av_direct_switch_ = s; }
 
   void on_ha_connected();
 
@@ -123,6 +134,11 @@ class CyrusBleComponent : public esphome::Component,
   esphome::sensor::Sensor *volume_sensor_{nullptr};
   esphome::sensor::Sensor *balance_sensor_{nullptr};
   esphome::text_sensor::TextSensor *source_sensor_{nullptr};
+  esphome::number::Number *volume_number_{nullptr};
+  esphome::number::Number *balance_number_{nullptr};
+  esphome::select::Select *source_select_{nullptr};
+  esphome::switch_::Switch *mute_switch_{nullptr};
+  esphome::switch_::Switch *av_direct_switch_{nullptr};
   esphome::text_sensor::TextSensor *model_sensor_{nullptr};
   esphome::text_sensor::TextSensor *sw_version_sensor_{nullptr};
   esphome::text_sensor::TextSensor *serial_sensor_{nullptr};
