@@ -4,6 +4,7 @@
 #include "esphome/core/log.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -58,7 +59,7 @@ void CyrusBleComponent::setup() {
 // ------------------------------------------------------------------
 
 void CyrusBleComponent::request_volume(int volume) {
-  target_volume_ = std::max(0, std::min(90, volume));
+  target_volume_ = std::max(0, std::min(volume_limit_, volume));
   led_indicator_.on_volume_request();
 
   if (connection_.is_connected()) {
@@ -72,10 +73,27 @@ void CyrusBleComponent::request_volume(int volume) {
 }
 
 void CyrusBleComponent::set_volume(int volume) {
-  volume = std::max(0, std::min(90, volume));
+  volume = std::max(0, std::min(volume_limit_, volume));
   uint8_t msg[protocol::MAX_PACKET];
   enqueue_command(msg, protocol::build_volume_packet(volume, msg));
   enqueue_fetch(protocol::Cmd::VOLUME);
+}
+
+void CyrusBleComponent::set_volume_limit(int limit) {
+  limit = std::max(0, std::min(90, limit));
+  if (limit == volume_limit_)
+    return;
+  ESP_LOGI(TAG, "Volume limit: %d -> %d", volume_limit_, limit);
+  volume_limit_ = limit;
+  if (target_volume_ > limit)
+    target_volume_ = limit;
+  // Rescale the volume slider so the full 0-100 range maps to 0..limit.
+  if (last_raw_volume_ >= 0 && volume_number_ != nullptr) {
+    const int scaled = volume_limit_ > 0
+                           ? std::lround(last_raw_volume_ * 100.0f / volume_limit_)
+                           : 0;
+    volume_number_->publish_state(std::min(100, scaled));
+  }
 }
 
 void CyrusBleComponent::set_mute(bool enabled) {
@@ -351,12 +369,15 @@ void CyrusBleComponent::process_notification(const BleNotification &n) {
 
     case protocol::Cmd::VOLUME: {
       const int raw = ascii_payload_to_int(n.payload, n.len);
+      last_raw_volume_ = raw;
       if (volume_sensor_ != nullptr) {
         volume_sensor_->publish_state(raw);
       }
       if (volume_number_ != nullptr) {
-        // Raw amp scale 0-90: whole steps, no percentage curve.
-        volume_number_->publish_state(raw);
+        // Slider 0-100 maps linearly to 0..volume_limit (amp scale).
+        const int scaled =
+            volume_limit_ > 0 ? std::lround(raw * 100.0f / volume_limit_) : 0;
+        volume_number_->publish_state(std::min(100, scaled));
       }
       break;
     }

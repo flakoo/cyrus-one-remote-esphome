@@ -70,6 +70,8 @@ class CyrusBleComponent : public esphome::Component,
 
   // Control commands (require an active connection; otherwise dropped).
   void set_volume(int volume);
+  void set_volume_limit(int limit);
+  int volume_limit() const { return volume_limit_; }
   void set_mute(bool enabled);
   void set_av_direct(bool enabled);
   void set_balance(int balance);
@@ -148,6 +150,8 @@ class CyrusBleComponent : public esphome::Component,
 
   State state_{State::IDLE};
   int target_volume_{36};
+  int volume_limit_{90};      // configurable ceiling, clamps all volume paths
+  int last_raw_volume_{-1};   // last reported amp value, for limit rescale
   bool is_hd_{false};
   bool model_known_{false};
 
