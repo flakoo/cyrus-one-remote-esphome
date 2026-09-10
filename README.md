@@ -26,8 +26,8 @@ Assistant over the (encrypted) ESPHome native API.
 Once the ESP32 device is added to HA via the standard ESPHome integration,
 the following native entities appear — no custom integration needed:
 
-- **Cyrus Volume** — slider 0-100 % (the amp's non-linear volume
-  characteristic, curve factor 15, is applied on the ESP32)
+- **Cyrus Volume** — slider 0-90 (the amp's internal volume scale; whole
+  steps, no percentage curve)
 - **Cyrus Source** — dropdown (Cyrus ONE inputs by default; for ONE HD
   adjust the list in `esphome/cyrus-remote.yaml`)
 - **Cyrus Mute**, **Cyrus AV Direct** — switches

@@ -4,7 +4,6 @@
 #include "esphome/core/log.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -103,6 +102,8 @@ void CyrusBleComponent::set_source(const std::string &source) {
       uint8_t msg[protocol::MAX_PACKET];
       enqueue_command(msg, protocol::build_source_packet(i + 1, msg));
       enqueue_fetch(protocol::Cmd::SOURCE);
+      pending_source_ = source;
+      source_quiet_until_ = esphome::millis() + SOURCE_QUIET_WINDOW_MS;
       return;
     }
   }
@@ -354,9 +355,8 @@ void CyrusBleComponent::process_notification(const BleNotification &n) {
         volume_sensor_->publish_state(raw);
       }
       if (volume_number_ != nullptr) {
-        // Non-linear characteristic (curve factor 15), exposed as 0-100 %.
-        const float pct = (powf(15.0f, raw / 90.0f) - 1.0f) / 14.0f * 100.0f;
-        volume_number_->publish_state(pct);
+        // Raw amp scale 0-90: whole steps, no percentage curve.
+        volume_number_->publish_state(raw);
       }
       break;
     }
@@ -397,11 +397,25 @@ void CyrusBleComponent::process_notification(const BleNotification &n) {
       size_t count;
       const char *const *list = source_list(&count);
       if (index >= 0 && (size_t)index < count) {
+        const char *name = list[index];
+        // During the quiet window after a source command the amp may echo
+        // notifications with the pre-change source; never overwrite the
+        // optimistic select state with a mismatched value in that window.
+        if (source_quiet_until_ != 0 && esphome::millis() < source_quiet_until_ &&
+            pending_source_ != name) {
+          ESP_LOGD(TAG, "Ignoring SOURCE='%s' write-back during quiet window (pending '%s')",
+                   name, pending_source_.c_str());
+          break;
+        }
+        if (source_quiet_until_ != 0 && esphome::millis() >= source_quiet_until_) {
+          source_quiet_until_ = 0;
+          pending_source_.clear();
+        }
         if (source_sensor_ != nullptr) {
-          source_sensor_->publish_state(list[index]);
+          source_sensor_->publish_state(name);
         }
         if (source_select_ != nullptr) {
-          source_select_->publish_state(list[index]);
+          source_select_->publish_state(name);
         }
       }
       break;

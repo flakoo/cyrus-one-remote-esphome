@@ -102,6 +102,9 @@ class CyrusBleComponent : public esphome::Component,
   static constexpr uint32_t SCAN_TIMEOUT_MS = 15000;
   static constexpr uint32_t MAC_A_TO_B_TIMEOUT_MS = 4500;
   static constexpr uint32_t COMMAND_SPACING_MS = 200;
+  // After a source change command the amp echoes notifications that may still
+  // carry the old source; ignore mismatched updates for this long.
+  static constexpr uint32_t SOURCE_QUIET_WINDOW_MS = 1500;
 
   struct BleNotification {
     uint8_t cmd;
@@ -147,6 +150,11 @@ class CyrusBleComponent : public esphome::Component,
   int target_volume_{36};
   bool is_hd_{false};
   bool model_known_{false};
+
+  // Pending source change: suppresses write-back notifications carrying the
+  // pre-change source while the command is being processed by the amp.
+  std::string pending_source_;
+  uint32_t source_quiet_until_{0};
 
   BleScanner scanner_;
   BleConnection connection_;

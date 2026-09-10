@@ -181,20 +181,19 @@ cyrus_ble:
 # publishes the real state on every BLE notification - no polling, no revert.
 
 number:
-  # Volume exposed as 0-100 % with the amp's non-linear characteristic
-  # applied (curve factor 15, same as the cyrus-one-hass integration).
+  # Volume in the amp's internal scale (0-90, whole steps) - no percentage
+  # curve, so slider and reported state are always integers.
   - platform: template
     name: "Cyrus Volume"
     id: cyrus_volume_number
     icon: mdi:volume-high
     min_value: 0
-    max_value: 100
+    max_value: 90
     step: 1
     optimistic: true
     set_action:
       lambda: |-
-        const float ratio = (x / 100.0f) * 14.0f + 1.0f;
-        id(cyrus_ble_device)->set_volume((int) roundf(90.0f * logf(ratio) / logf(15.0f)));
+        id(cyrus_ble_device)->set_volume((int) x);
   # Balance exposed as -10 (left) .. +10 (right), 0 = center.
   - platform: template
     name: "Cyrus Balance"
