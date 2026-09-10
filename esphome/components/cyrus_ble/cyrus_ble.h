@@ -29,6 +29,10 @@ class CyrusBleComponent : public esphome::Component,
  public:
   CyrusBleComponent();
 
+  // Host-task entry points invoked by trampolines (public for linkage).
+  void restart_scan_on_host();
+  void connect_first_mac_on_host();
+
   void set_status_sensor(esphome::binary_sensor::BinarySensor *status_sensor);
   void set_led(esphome::light::LightState *led);
 
@@ -102,7 +106,6 @@ class CyrusBleComponent : public esphome::Component,
   int ascii_payload_to_int(const uint8_t *payload, size_t len);
   const char *const *source_list(size_t *count);
 
-  void start_scan_if_synced();
   void start_scanning(const char *reason);
   void on_scan_timeout();
   void on_mac_b_timeout();

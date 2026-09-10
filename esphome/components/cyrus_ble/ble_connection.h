@@ -44,6 +44,9 @@ class BleConnection {
   void disconnect();
   void write_volume(int volume);
   void send_command(const uint8_t *msg, size_t len);
+  // Runs the GATT write; must only run on the NimBLE host task (used by the
+  // host_task dispatcher).
+  void write_on_host(const uint8_t *msg, size_t len);
 
   // Dispatches NimBLE GAP/GATT events registered during connect().
   void on_gap_event(const struct ble_gap_event *event);
@@ -75,6 +78,8 @@ class BleConnection {
   uint16_t svc_start_{0};
   uint16_t svc_end_{0};
   uint16_t attr_handle_{0};
+  uint16_t attr_def_handle_{0};
+  uint16_t attr_end_handle_{0};
   uint16_t cccd_handle_{0};
   bool connecting_{false};
   bool subscribed_{false};

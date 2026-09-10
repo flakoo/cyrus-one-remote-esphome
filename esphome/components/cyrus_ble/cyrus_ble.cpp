@@ -1,5 +1,6 @@
 #include "cyrus_ble.h"
 #include "cyrus_protocol.h"
+#include "host_task.h"
 #include "esphome/core/log.h"
 
 #include <algorithm>
@@ -43,6 +44,7 @@ void CyrusBleComponent::setup() {
     ESP_LOGE(TAG, "nimble_port_init failed: %d", rc);
     return;
   }
+  host_task_init();
 
   instance_ = this;
   ble_hs_cfg.sync_cb = sync_cb;
@@ -230,25 +232,40 @@ void CyrusBleComponent::reset_cb(int reason) {
   ESP_LOGE(TAG, "NimBLE host reset: %d", reason);
 }
 
-void CyrusBleComponent::start_scan_if_synced() {
-  if (scanner_.is_scanning()) {
-    return;
-  }
+// NimBLE host API calls are only legal on the host task - these trampolines
+// route them through the dispatcher (see host_task.h).
+static void trampoline_restart_scan(void *arg) {
+  static_cast<CyrusBleComponent *>(arg)->restart_scan_on_host();
+}
+
+static void trampoline_connect_first(void *arg) {
+  static_cast<CyrusBleComponent *>(arg)->connect_first_mac_on_host();
+}
+
+void CyrusBleComponent::restart_scan_on_host() {
   if (!ble_hs_synced()) {
     ESP_LOGI(TAG, "NimBLE not synced yet, scan will start after sync");
     return;
   }
+  if (scanner_.is_scanning()) {
+    scanner_.stop();
+  }
   scanner_.start();
 }
 
-void CyrusBleComponent::start_scanning(const char *reason) {
+void CyrusBleComponent::connect_first_mac_on_host() {
   if (scanner_.is_scanning()) {
-    ESP_LOGW(TAG, "Cancelling previous scan (%s)", reason);
     scanner_.stop();
   }
+  connection_.set_pending_volume(target_volume_);
+  connection_.connect(first_addr_);
+}
+
+void CyrusBleComponent::start_scanning(const char *reason) {
+  ESP_LOGD(TAG, "Scan requested: %s", reason);
   state_ = State::SCANNING;
   scan_start_time_ = esphome::millis();
-  start_scan_if_synced();
+  host_task_call(trampoline_restart_scan, this);
 }
 
 // ------------------------------------------------------------------
@@ -444,14 +461,12 @@ void CyrusBleComponent::enqueue_state_refresh() {
 void CyrusBleComponent::on_scan_timeout() {
   // Normal state when the amp is off: keep listening indefinitely.
   ESP_LOGD(TAG, "Scan window elapsed, restarting (amp likely off)");
-  scanner_.stop();
   start_scanning("rescan");
 }
 
 void CyrusBleComponent::on_mac_b_timeout() {
   ESP_LOGW(TAG, "MAC B timeout (%lu ms after MAC A), falling back to MAC A",
            MAC_A_TO_B_TIMEOUT_MS);
-  scanner_.stop();
   scanner_.clear_mac_a_time();
   connect_to_mac_a_fallback();
 }
@@ -462,8 +477,7 @@ void CyrusBleComponent::connect_to_mac_a_fallback() {
            first_addr_.val[5], first_addr_.val[4], first_addr_.val[3],
            first_addr_.val[2], first_addr_.val[1], first_addr_.val[0]);
   ESP_LOGW(TAG, "Fallback: connecting to MAC A %s", addr_str);
-  connection_.set_pending_volume(target_volume_);
-  connection_.connect(first_addr_);
+  host_task_call(trampoline_connect_first, this);
 }
 
 void CyrusBleComponent::publish_status(bool ok) {

@@ -1,12 +1,55 @@
 #include "ble_connection.h"
 #include "cyrus_protocol.h"
+#include "host_task.h"
 #include "esphome/core/log.h"
 
+#include <cstring>
+
+extern "C" {
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+}
+
 namespace cyrus_ble {
+
+namespace {
+
+constexpr int WRITE_SLOT_COUNT = 4;
+
+struct WriteSlot {
+  BleConnection *self;
+  uint16_t len;
+  uint8_t data[protocol::MAX_PACKET];
+};
+
+WriteSlot s_slots[WRITE_SLOT_COUNT];
+QueueHandle_t s_free_slots = nullptr;
+
+void ensure_slot_pool() {
+  if (s_free_slots != nullptr)
+    return;
+  s_free_slots = xQueueCreate(WRITE_SLOT_COUNT, sizeof(WriteSlot *));
+  for (auto &slot : s_slots) {
+    WriteSlot *ptr = &slot;
+    xQueueSend(s_free_slots, &ptr, 0);
+  }
+}
+
+void trampoline_write(void *arg) {
+  auto *slot = static_cast<WriteSlot *>(arg);
+  slot->self->write_on_host(slot->data, slot->len);
+  if (xQueueSend(s_free_slots, &slot, 0) != pdTRUE) {
+    ESP_LOGE("cyrus", "Write slot pool corrupted");
+  }
+}
+
+}  // namespace
 
 void BleConnection::connect(const ble_addr_t &addr) {
   // Reset discovery handles in case of reuse.
   attr_handle_ = 0;
+  attr_def_handle_ = 0;
+  attr_end_handle_ = 0;
   cccd_handle_ = 0;
   svc_start_ = 0;
   svc_end_ = 0;
@@ -52,6 +95,35 @@ void BleConnection::write_volume(int volume) {
 }
 
 void BleConnection::send_command(const uint8_t *msg, size_t len) {
+  // May be called from the main loop: marshal the actual GATT write onto
+  // the NimBLE host task (see host_task.h).
+  ensure_slot_pool();
+  WriteSlot *slot = nullptr;
+  if (xQueueReceive(s_free_slots, &slot, 0) != pdTRUE) {
+    ESP_LOGW("cyrus", "Write slot pool exhausted, command dropped");
+    if (volume_write_in_flight_) {
+      volume_write_in_flight_ = false;
+      if (listener_ != nullptr) {
+        listener_->on_volume_written(false);
+      }
+    }
+    return;
+  }
+  slot->self = this;
+  slot->len = len;
+  std::memcpy(slot->data, msg, len);
+  if (!host_task_call(trampoline_write, slot)) {
+    xQueueSend(s_free_slots, &slot, 0);
+    if (volume_write_in_flight_) {
+      volume_write_in_flight_ = false;
+      if (listener_ != nullptr) {
+        listener_->on_volume_written(false);
+      }
+    }
+  }
+}
+
+void BleConnection::write_on_host(const uint8_t *msg, size_t len) {
   if (conn_handle_ == BLE_HS_CONN_HANDLE_NONE || attr_handle_ == 0) {
     ESP_LOGW("cyrus", "send_command without active connection, dropped");
     if (volume_write_in_flight_) {
@@ -118,6 +190,8 @@ void BleConnection::handle_disconnect(const struct ble_gap_event *event) {
   ESP_LOGI("cyrus", "Disconnected, reason=%d", event->disconnect.reason);
   conn_handle_ = BLE_HS_CONN_HANDLE_NONE;
   attr_handle_ = 0;
+  attr_def_handle_ = 0;
+  attr_end_handle_ = 0;
   cccd_handle_ = 0;
   svc_start_ = 0;
   svc_end_ = 0;
@@ -132,8 +206,8 @@ void BleConnection::handle_notify_rx(const struct ble_gap_event *event) {
     return;
 
   uint8_t buf[protocol::MAX_PACKET];
-  const uint16_t len = ble_hs_mbuf_to_flat(event->notify_rx.om, buf,
-                                           sizeof(buf), nullptr);
+  uint16_t len = 0;
+  ble_hs_mbuf_to_flat(event->notify_rx.om, buf, sizeof(buf), &len);
 
   uint8_t cmd;
   uint8_t payload[protocol::MAX_PAYLOAD];
@@ -199,11 +273,22 @@ int BleConnection::chr_disced_cb(uint16_t conn_handle,
 
   if (error->status == BLE_HS_EDONE || chr == nullptr) {
     if (self->attr_handle_ != 0) {
+      if (self->attr_end_handle_ == 0) {
+        // Last characteristic in the service: descriptors run to svc end.
+        self->attr_end_handle_ = self->svc_end_;
+      }
       self->discover_descriptors();
     } else {
       self->abort_with_error("Cyrus characteristic not found");
     }
     return 0;
+  }
+
+  // Track the end of the target characteristic: the def handle of the next
+  // characteristic (minus one) bounds its descriptor range.
+  if (self->attr_def_handle_ != 0 && chr->def_handle > self->attr_def_handle_ &&
+      (self->attr_end_handle_ == 0 || chr->def_handle - 1 < self->attr_end_handle_)) {
+    self->attr_end_handle_ = chr->def_handle - 1;
   }
 
   ble_uuid_any_t target_uuid;
@@ -212,6 +297,7 @@ int BleConnection::chr_disced_cb(uint16_t conn_handle,
 
   if (ble_uuid_cmp(&chr->uuid.u, &target_uuid.u) == 0) {
     self->attr_handle_ = chr->val_handle;
+    self->attr_def_handle_ = chr->def_handle;
     ESP_LOGI("cyrus", "Cyrus char found, handle=%d", self->attr_handle_);
   }
 
@@ -219,8 +305,9 @@ int BleConnection::chr_disced_cb(uint16_t conn_handle,
 }
 
 void BleConnection::discover_descriptors() {
-  const int rc = ble_gattc_disc_all_dscs(conn_handle_, svc_start_, svc_end_,
-                                         dsc_disced_cb, this);
+  ESP_LOGI("cyrus", "Discovering descriptors %d-%d", attr_handle_, attr_end_handle_);
+  const int rc = ble_gattc_disc_all_dscs(conn_handle_, attr_handle_,
+                                         attr_end_handle_, dsc_disced_cb, this);
   if (rc != 0) {
     abort_with_error("descriptor discovery start");
   }

@@ -226,6 +226,9 @@ select:
       - Optical
       - SPDIF
     lambda: |-
+      if (id(cyrus_source).state.empty()) {
+        return std::optional<std::string>();
+      }
       return id(cyrus_source).state;
     set_action:
       lambda: |-
