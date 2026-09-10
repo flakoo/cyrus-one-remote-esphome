@@ -181,20 +181,20 @@ cyrus_ble:
 # publishes the real state on every BLE notification - no polling, no revert.
 
 number:
-  # Volume slider 0-100, linearly mapped to 0..Cyrus Volume Limit (amp scale).
-  # 100 on the slider always means "as loud as the configured limit".
+  # Volume in absolute amp units 0..Cyrus Volume Limit. max_value is only
+  # a placeholder: the component sets it to the limit at runtime (HA picks
+  # the range up at connect), so every slider step is exactly 1.
   - platform: template
     name: "Cyrus Volume"
     id: cyrus_volume_number
     icon: mdi:volume-high
     min_value: 0
-    max_value: 100
+    max_value: 90
     step: 1
     optimistic: true
     set_action:
       lambda: |-
-        id(cyrus_ble_device)->set_volume(
-            (int) ((x / 100.0f) * id(cyrus_ble_device)->volume_limit() + 0.5f));
+        id(cyrus_ble_device)->set_volume((int) x);
   # Configurable volume ceiling (amp scale 0-90). Survives reboots and
   # rescales the Cyrus Volume slider.
   - platform: template

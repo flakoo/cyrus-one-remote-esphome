@@ -24,6 +24,17 @@ extern "C" {
 #include "freertos/queue.h"
 }
 
+// NimBLE's modlog #defines LOG_LEVEL_* macros that clash with the unscoped
+// LogLevel enum in esphome's api_pb2.h when API headers share this
+// translation unit. Nothing here expands NimBLE's logging macros (they are
+// only used inside NimBLE's own .c files), so drop the macros.
+#undef LOG_LEVEL_DEBUG
+#undef LOG_LEVEL_INFO
+#undef LOG_LEVEL_WARN
+#undef LOG_LEVEL_ERROR
+#undef LOG_LEVEL_CRITICAL
+#undef LOG_LEVEL_NONE
+
 namespace cyrus_ble {
 
 class CyrusBleComponent : public esphome::Component,

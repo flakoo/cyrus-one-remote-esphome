@@ -1,10 +1,11 @@
 #include "cyrus_ble.h"
 #include "cyrus_protocol.h"
 #include "host_task.h"
+#include "esphome/core/application.h"
 #include "esphome/core/log.h"
+#include "esphome/components/api/api_server.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -87,12 +88,21 @@ void CyrusBleComponent::set_volume_limit(int limit) {
   volume_limit_ = limit;
   if (target_volume_ > limit)
     target_volume_ = limit;
-  // Rescale the volume slider so the full 0-100 range maps to 0..limit.
-  if (last_raw_volume_ >= 0 && volume_number_ != nullptr) {
-    const int scaled = volume_limit_ > 0
-                           ? std::lround(last_raw_volume_ * 100.0f / volume_limit_)
-                           : 0;
-    volume_number_->publish_state(std::min(100, scaled));
+  if (volume_number_ != nullptr) {
+    // The slider works in absolute amp units 0..limit: shrink its range to
+    // the limit so every step is exactly 1.
+    volume_number_->traits.set_max_value((float) limit);
+    if (last_raw_volume_ >= 0) {
+      volume_number_->publish_state(std::min(last_raw_volume_, limit));
+    }
+  }
+  // Entity traits (min/max) are only announced at API handshake, so a live
+  // change needs a reboot for HA to re-fetch the slider range. Skipped when
+  // no client is connected (e.g. boot-time restore): the new range reaches
+  // HA at the upcoming connect anyway, and this also prevents a reboot loop.
+  if (esphome::api::global_api_server->is_connected()) {
+    ESP_LOGI(TAG, "Rebooting to propagate new volume limit to Home Assistant");
+    esphome::App.safe_reboot();
   }
 }
 
@@ -374,10 +384,8 @@ void CyrusBleComponent::process_notification(const BleNotification &n) {
         volume_sensor_->publish_state(raw);
       }
       if (volume_number_ != nullptr) {
-        // Slider 0-100 maps linearly to 0..volume_limit (amp scale).
-        const int scaled =
-            volume_limit_ > 0 ? std::lround(raw * 100.0f / volume_limit_) : 0;
-        volume_number_->publish_state(std::min(100, scaled));
+        // Slider works in absolute amp units 0..limit (clamped for display).
+        volume_number_->publish_state(std::min(raw, volume_limit_));
       }
       break;
     }
