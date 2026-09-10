@@ -68,7 +68,8 @@ inline size_t build_volume_packet(int volume, uint8_t *out) {
 }
 
 inline size_t build_balance_packet(int balance, uint8_t *out) {
-  const int clamped = balance < 0 ? 0 : (balance > 90 ? 90 : balance);
+  // Amp balance range is 0-20, 10 = center.
+  const int clamped = balance < 0 ? 0 : (balance > 20 ? 20 : balance);
   const uint8_t payload[2] = {static_cast<uint8_t>('0' + (clamped / 10)),
                               static_cast<uint8_t>('0' + (clamped % 10))};
   return build_message(Cmd::BALANCE, payload, sizeof(payload), out);

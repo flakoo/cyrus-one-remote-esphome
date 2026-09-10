@@ -28,10 +28,10 @@ the following native entities appear — no custom integration needed:
 
 - **Cyrus Volume** — slider 0-100 % (the amp's non-linear volume
   characteristic, curve factor 15, is applied on the ESP32)
-- **Cyrus Source** — dropdown (union of ONE / ONE HD inputs; entries the
-  current model does not have are ignored)
+- **Cyrus Source** — dropdown (Cyrus ONE inputs by default; for ONE HD
+  adjust the list in `esphome/cyrus-remote.yaml`)
 - **Cyrus Mute**, **Cyrus AV Direct** — switches
-- **Cyrus Balance** — slider 0-90
+- **Cyrus Balance** — slider -10 (left) .. +10 (right), 0 = center
 - **Cyrus Brightness Up/Down** — buttons (display LEDs)
 - Sensors: raw volume, balance, source, model, firmware version, serial
 - Binary sensors: **Cyrus Connected**, **Cyrus Ready** (link up + startup
