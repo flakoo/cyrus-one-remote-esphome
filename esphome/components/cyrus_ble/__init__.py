@@ -27,6 +27,7 @@ CONF_BALANCE_NUMBER = "balance_number"
 CONF_SOURCE_SELECT = "source_select"
 CONF_MUTE_SWITCH = "mute_switch"
 CONF_AV_DIRECT_SWITCH = "av_direct_switch"
+CONF_RESTART_REQUIRED_SENSOR = "restart_required_sensor"
 
 _BINARY_SENSORS = {
     CONF_STATUS_SENSOR: "set_status_sensor",
@@ -35,6 +36,7 @@ _BINARY_SENSORS = {
     CONF_MUTED_SENSOR: "set_muted_binary_sensor",
     CONF_HEADPHONES_SENSOR: "set_headphones_binary_sensor",
     CONF_AV_DIRECT_SENSOR: "set_av_direct_binary_sensor",
+    CONF_RESTART_REQUIRED_SENSOR: "set_restart_required_binary_sensor",
 }
 
 _SENSORS = {

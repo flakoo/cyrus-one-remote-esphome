@@ -61,6 +61,7 @@ class CyrusBleComponent : public esphome::Component,
   void set_muted_binary_sensor(esphome::binary_sensor::BinarySensor *s) { muted_sensor_ = s; }
   void set_headphones_binary_sensor(esphome::binary_sensor::BinarySensor *s) { headphones_sensor_ = s; }
   void set_av_direct_binary_sensor(esphome::binary_sensor::BinarySensor *s) { av_direct_sensor_ = s; }
+  void set_restart_required_binary_sensor(esphome::binary_sensor::BinarySensor *s) { restart_required_sensor_ = s; }
 
   // Control entities: the component publishes their state directly on BLE
   // notifications (entities are optimistic, no polling needed).
@@ -69,6 +70,10 @@ class CyrusBleComponent : public esphome::Component,
   void set_source_select(esphome::select::Select *s) { source_select_ = s; }
   void set_mute_switch(esphome::switch_::Switch *s) { mute_switch_ = s; }
   void set_av_direct_switch(esphome::switch_::Switch *s) { av_direct_switch_ = s; }
+
+  // Reboot to propagate a live volume-limit change to HA (slider range is
+  // only announced at API handshake).
+  void request_reboot();
 
   void on_ha_connected();
 
@@ -155,6 +160,7 @@ class CyrusBleComponent : public esphome::Component,
   esphome::select::Select *source_select_{nullptr};
   esphome::switch_::Switch *mute_switch_{nullptr};
   esphome::switch_::Switch *av_direct_switch_{nullptr};
+  esphome::binary_sensor::BinarySensor *restart_required_sensor_{nullptr};
   esphome::text_sensor::TextSensor *model_sensor_{nullptr};
   esphome::text_sensor::TextSensor *sw_version_sensor_{nullptr};
   esphome::text_sensor::TextSensor *serial_sensor_{nullptr};

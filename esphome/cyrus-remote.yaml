@@ -129,6 +129,23 @@ binary_sensor:
   - platform: template
     id: cyrus_av_direct
     name: "Cyrus AV Direct"
+  # Set when the volume limit changed live: the slider range only reaches
+  # HA after a restart (see the Cyrus Restart button).
+  - platform: template
+    id: cyrus_restart_required
+    name: "Cyrus Restart Required"
+    device_class: problem
+
+button:
+  # Confirms a pending slider-range change: reboots the ESP32 so HA
+  # re-fetches the volume slider range at the API handshake.
+  - platform: template
+    name: "Cyrus Restart"
+    icon: mdi:restart
+    on_press:
+      then:
+        - lambda: |-
+            id(cyrus_ble_device)->request_reboot();
 
 sensor:
   - platform: template
@@ -172,6 +189,7 @@ cyrus_ble:
   source_select: cyrus_source_select
   mute_switch: cyrus_mute_switch
   av_direct_switch: cyrus_av_direct_switch
+  restart_required_sensor: cyrus_restart_required
   led: light_esp32_rmt_led_strip_1
 
 # --- HA-facing controls ------------------------------------------------------

@@ -97,13 +97,21 @@ void CyrusBleComponent::set_volume_limit(int limit) {
     }
   }
   // Entity traits (min/max) are only announced at API handshake, so a live
-  // change needs a reboot for HA to re-fetch the slider range. Skipped when
-  // no client is connected (e.g. boot-time restore): the new range reaches
-  // HA at the upcoming connect anyway, and this also prevents a reboot loop.
-  if (esphome::api::global_api_server->is_connected()) {
-    ESP_LOGI(TAG, "Rebooting to propagate new volume limit to Home Assistant");
-    esphome::App.safe_reboot();
+  // change needs a reboot for HA to re-fetch the slider range. Flag it and
+  // let the user confirm via the restart button; when no client is
+  // connected (e.g. boot-time restore) the new range reaches HA at the
+  // upcoming connect anyway.
+  if (restart_required_sensor_ != nullptr && esphome::api::global_api_server->is_connected()) {
+    restart_required_sensor_->publish_state(true);
   }
+}
+
+void CyrusBleComponent::request_reboot() {
+  ESP_LOGI(TAG, "Restart requested (volume limit propagation)");
+  if (restart_required_sensor_ != nullptr) {
+    restart_required_sensor_->publish_state(false);
+  }
+  esphome::App.safe_reboot();
 }
 
 void CyrusBleComponent::set_mute(bool enabled) {

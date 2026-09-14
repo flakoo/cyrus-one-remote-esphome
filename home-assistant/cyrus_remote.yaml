@@ -85,3 +85,22 @@ script:
             to: "on"
         timeout: "30"
         continue_on_timeout: true
+
+  # The volume slider range is only announced to HA at connect time, so a
+  # live volume-limit change flags binary_sensor...restart_required. Surface
+  # it as a notification; pressing the button.cyrus_remote_cyrus_restart
+  # button reboots the ESP32 and the new slider range appears.
+  - alias: "Cyrus restart required after limit change"
+    id: cyrus_restart_required_notify
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.cyrus_remote_cyrus_restart_required
+        to: "on"
+    action:
+      - service: persistent_notification.create
+        data:
+          title: "Cyrus: restart required"
+          message: >-
+            The volume limit changed. Press button.cyrus_remote_cyrus_restart
+            to reboot the controller and apply the new volume slider range.
+          notification_id: cyrus_restart_required

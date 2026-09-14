@@ -29,8 +29,11 @@ the following native entities appear — no custom integration needed:
 - **Cyrus Volume** — slider in absolute amp units 0..**Cyrus Volume
   Limit**; every step is exactly 1, no percentage scaling
 - **Cyrus Volume Limit** — configurable ceiling 0-90 (amp scale),
-  survives reboots and rescales the volume slider to 0..limit (the
-  ESP32 reboots once after a live change so HA re-fetches the range)
+  survives reboots and rescales the volume slider to 0..limit. A live
+  change sets **Cyrus Restart Required** — press **Cyrus Restart** to
+  reboot the ESP32 so HA re-fetches the slider range
+- **Cyrus Restart** — button; reboots the controller (used to apply a
+  live volume-limit change)
 - **Cyrus Source** — dropdown (Cyrus ONE inputs by default; for ONE HD
   adjust the list in `esphome/cyrus-remote.yaml`)
 - **Cyrus Mute**, **Cyrus AV Direct** — switches
@@ -39,7 +42,8 @@ the following native entities appear — no custom integration needed:
 - Sensors: raw volume, balance, source, model, firmware version, serial
 - Binary sensors: **Cyrus Connected**, **Cyrus Ready** (link up + startup
   volume written), **Cyrus Volume Set** (legacy pulse used by the power-on
-  automation), headphones present
+  automation), **Cyrus Restart Required** (live volume-limit change
+  pending), headphones present
 
 Physical knob/source changes on the amp itself are pushed live to HA over
 BLE notifications.
