@@ -37,9 +37,12 @@ the following native entities appear — no custom integration needed:
   owns the configuration — **Cyrus plug enabled** (`input_boolean`) and
   **Cyrus plug IP** (`input_text`, IPv4 validated with the `ipaddr`
   filter) — and passes the IP with every request. The plug feature can be
-  switched off entirely (no IP needed, no diagnostics; **Cyrus Amp** then
-  becomes unavailable). Local authentication must stay disabled on the plug
-  (RPC Digest auth is not implemented)
+  switched off entirely (no IP needed, no diagnostics; **Cyrus Amp Plug**
+  then becomes unavailable). The package deliberately does not provide the
+  user-facing **Cyrus Amp** switch: wire your own switch/scripts to
+  `switch.cyrus_amp_plug` (see the commented example in the package). Local
+  authentication must stay disabled on the plug (RPC Digest auth is not
+  implemented)
 - **Cyrus Plug State** (binary sensor) — raw plug state published by the
   ESP32 from its 10 s `Switch.Get` polling (so the plug's own button/app
   shows up in HA)

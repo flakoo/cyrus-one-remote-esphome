@@ -70,19 +70,14 @@ template:
             data:
               ip: "{{ states('input_text.cyrus_plug_ip') }}"
               on: false
-  # Single switch to turn the amplifier on/off from the UI.
-  # Power-off just cuts the plug; power-on runs the volume script below.
-  - switch:
-      - name: "Cyrus Amp"
-        unique_id: cyrus_amp_power_switch
-        state: "{{ is_state('switch.cyrus_amp_plug', 'on') }}"
-        availability: "{{ states('switch.cyrus_amp_plug') not in ['unknown', 'unavailable'] }}"
-        turn_on:
-          - service: script.cyrus_amp_turn_on_with_volume
-        turn_off:
-          - service: switch.turn_off
-            target:
-              entity_id: switch.cyrus_amp_plug
+  # NOTE: this package intentionally does NOT define the user-facing
+  # "Cyrus Amp" switch - you wire your own (existing) switch/script to
+  # `switch.cyrus_amp_plug` so the power-on flow (plug on -> BLE connect ->
+  # startup volume) runs through the ESP32:
+  #
+  #   state: "{{ is_state('switch.cyrus_amp_plug', 'on') }}"
+  #   availability: "{{ states('switch.cyrus_amp_plug') not in ['unknown', 'unavailable'] }}"
+  #   turn_off -> switch.turn_off on switch.cyrus_amp_plug
 
 automation:
   # Apply the plug configuration to the stateless ESP32: (re)start
