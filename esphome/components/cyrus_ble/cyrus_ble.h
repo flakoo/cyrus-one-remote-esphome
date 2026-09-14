@@ -95,16 +95,17 @@ class CyrusBleComponent : public esphome::Component,
   void brightness_up();
   void brightness_down();
 
-  // Shelly Plug S Gen3 powering the amp (local RPC over HTTP; local auth
-  // must be disabled on the plug). ip is validated at build time
-  // (ipv4address) and again at runtime. The whole feature can be turned off
-  // with set_plug_enabled(false) - no IP needed, no diagnostics raised.
-  void set_plug_ip(const std::string &ip) { plug_ip_ = ip; }
-  void set_plug_enabled(bool enabled) { plug_enabled_ = enabled; }
-  void set_plug_switch(esphome::switch_::Switch *s) { plug_switch_ = s; }
+  // Shelly plug control, stateless by design: HA owns the configuration
+  // (enabled flag + target IP) and passes the IP with every request. The
+  // ESP only executes local Shelly RPC (HTTP; the plug's local auth must be
+  // disabled) and reports ok / unreachable / invalid ip - HA interprets
+  // that against its own configuration.
+  void set_plug(const std::string &ip, bool on);
+  // Start (ip non-empty) or stop (ip empty) polling Switch.Get at ip.
+  void monitor_plug(const std::string &ip);
+  void set_plug_switch(esphome::binary_sensor::BinarySensor *s) { plug_switch_ = s; }
   void set_plug_ok_sensor(esphome::binary_sensor::BinarySensor *s) { plug_ok_sensor_ = s; }
   void set_plug_diagnostic_sensor(esphome::text_sensor::TextSensor *s) { plug_diagnostic_sensor_ = s; }
-  void set_plug(bool on);
 
   // BleScannerListener (NimBLE host task)
   void on_first_mac(const ble_addr_t &addr) override;
@@ -159,7 +160,7 @@ class CyrusBleComponent : public esphome::Component,
   void set_link_state(bool connected, bool ready);
 
   // Shelly plug RPC helpers.
-  bool shelly_rpc_get(const char *method_params, bool *output);
+  bool shelly_rpc_get(const std::string &ip, const char *method_params, bool *output);
   void poll_plug(uint32_t now);
   void publish_plug_diagnostics(bool ok, const char *status);
 
@@ -178,15 +179,14 @@ class CyrusBleComponent : public esphome::Component,
   esphome::select::Select *source_select_{nullptr};
   esphome::switch_::Switch *mute_switch_{nullptr};
   esphome::switch_::Switch *av_direct_switch_{nullptr};
-  esphome::switch_::Switch *plug_switch_{nullptr};
+  esphome::binary_sensor::BinarySensor *plug_switch_{nullptr};
   esphome::binary_sensor::BinarySensor *plug_ok_sensor_{nullptr};
   esphome::text_sensor::TextSensor *plug_diagnostic_sensor_{nullptr};
   esphome::binary_sensor::BinarySensor *restart_required_sensor_{nullptr};
 
-  // Shelly plug state.
-  std::string plug_ip_;
-  bool plug_enabled_{true};
-  bool plug_ip_valid_{false};
+  // Shelly plug state (stateless: target IP comes from HA with each call).
+  std::string monitor_ip_;
+  bool monitor_active_{false};
   bool plug_ok_current_{false};
   uint32_t last_plug_poll_{0};
   esphome::text_sensor::TextSensor *model_sensor_{nullptr};

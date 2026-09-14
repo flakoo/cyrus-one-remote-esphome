@@ -38,36 +38,10 @@ void CyrusBleComponent::on_ha_connected() {
 void CyrusBleComponent::setup() {
   ESP_LOGI(TAG, "Initializing native NimBLE");
 
-  // Runtime IP check on top of the build-time ipv4address validation:
-  // ip4addr_aton returns 0 for malformed addresses and for 0.0.0.0.
-  // When the plug feature is disabled, none of this runs: no IP required,
-  // no diagnostics raised.
-  if (plug_enabled_) {
-    if (plug_ip_.empty()) {
-      ESP_LOGW(TAG, "shelly_plug_ip is not configured but the plug feature "
-                    "is enabled - set shelly_plug_ip or disable it with "
-                    "shelly_plug_enabled: false");
-      publish_plug_diagnostics(false, "not configured");
-    } else {
-      ip4_addr_t parsed{};
-      plug_ip_valid_ = (ip4addr_aton(plug_ip_.c_str(), &parsed) != 0);
-      if (!plug_ip_valid_) {
-        ESP_LOGE(TAG, "shelly_plug_ip '%s' is not a usable IPv4 address - "
-                      "plug control disabled",
-                 plug_ip_.c_str());
-        publish_plug_diagnostics(false, "not configured");
-      } else {
-        ESP_LOGI(TAG, "Shelly plug at %s (RPC over HTTP, polled every %u s)",
-                 plug_ip_.c_str(), (unsigned) (PLUG_POLL_INTERVAL_MS / 1000));
-        // Presumed unreachable until the first poll (which runs in loop(),
-        // once Wi-Fi is up) proves otherwise.
-        publish_plug_diagnostics(false, "unreachable");
-      }
-    }
-  } else {
-    ESP_LOGI(TAG, "Shelly plug feature disabled (shelly_plug_enabled: false)");
-    publish_plug_diagnostics(false, "disabled");
-  }
+  // Stateless plug control: nothing to validate or configure here. HA owns
+  // the plug configuration and pushes the target IP with every request via
+  // the cyrus_plug_set / cyrus_plug_monitor API actions.
+  ESP_LOGI(TAG, "Plug control: stateless, configured from Home Assistant");
 
   notification_queue_ = xQueueCreate(8, sizeof(BleNotification));
   if (notification_queue_ == nullptr) {
@@ -194,9 +168,10 @@ void CyrusBleComponent::brightness_down() {
 // Shelly Plug S Gen3 (local RPC over HTTP)
 // ------------------------------------------------------------------
 
-bool CyrusBleComponent::shelly_rpc_get(const char *method_params, bool *output) {
+bool CyrusBleComponent::shelly_rpc_get(const std::string &ip, const char *method_params,
+                                       bool *output) {
   char url[96];
-  snprintf(url, sizeof(url), "http://%s/rpc/%s", plug_ip_.c_str(), method_params);
+  snprintf(url, sizeof(url), "http://%s/rpc/%s", ip.c_str(), method_params);
 
   esp_http_client_config_t cfg{};
   cfg.url = url;
@@ -236,38 +211,61 @@ void CyrusBleComponent::publish_plug_diagnostics(bool ok, const char *status) {
   }
 }
 
-void CyrusBleComponent::set_plug(bool on) {
-  if (!plug_enabled_ || !plug_ip_valid_) {
-    ESP_LOGW(TAG, "Shelly plug command ignored: feature disabled or IP not "
-                  "configured/invalid");
+void CyrusBleComponent::monitor_plug(const std::string &ip) {
+  if (ip.empty()) {
+    monitor_active_ = false;
+    monitor_ip_.clear();
+    ESP_LOGI(TAG, "Plug monitoring stopped by HA");
+    return;
+  }
+  ip4_addr_t parsed{};
+  if (ip4addr_aton(ip.c_str(), &parsed) == 0) {
+    ESP_LOGW(TAG, "monitor_plug: invalid IP '%s' - ignored", ip.c_str());
+    publish_plug_diagnostics(false, "invalid ip");
+    return;
+  }
+  monitor_ip_ = ip;
+  monitor_active_ = true;
+  last_plug_poll_ = 0;  // poll on the next loop iteration
+  ESP_LOGI(TAG, "Plug monitoring %s (Switch.Get every %u s)", ip.c_str(),
+           (unsigned) (PLUG_POLL_INTERVAL_MS / 1000));
+  // Presumed unreachable until the first poll proves otherwise.
+  publish_plug_diagnostics(false, "unreachable");
+}
+
+void CyrusBleComponent::set_plug(const std::string &ip, bool on) {
+  ip4_addr_t parsed{};
+  if (ip4addr_aton(ip.c_str(), &parsed) == 0) {
+    ESP_LOGW(TAG, "set_plug: invalid IP '%s'", ip.c_str());
+    publish_plug_diagnostics(false, "invalid ip");
     return;
   }
   char params[48];
   snprintf(params, sizeof(params), "Switch.Set?id=0&on=%s", on ? "true" : "false");
   bool output = false;
-  if (shelly_rpc_get(params, &output)) {
+  if (shelly_rpc_get(ip, params, &output)) {
     if (plug_switch_ != nullptr) {
       plug_switch_->publish_state(output);
     }
     publish_plug_diagnostics(true, "ok");
   } else {
-    ESP_LOGW(TAG, "Shelly Switch.Set failed (%s unreachable at %s)",
-             on ? "on" : "off", plug_ip_.c_str());
+    ESP_LOGW(TAG, "Shelly Switch.Set failed (%s unreachable at %s)", on ? "on" : "off",
+             ip.c_str());
     publish_plug_diagnostics(false, "unreachable");
   }
 }
 
 void CyrusBleComponent::poll_plug(uint32_t now) {
-  if (!plug_enabled_ || !plug_ip_valid_ ||
+  if (!monitor_active_ || monitor_ip_.empty() ||
       now - last_plug_poll_ < PLUG_POLL_INTERVAL_MS) {
     return;
   }
   last_plug_poll_ = now;
 
   bool on = false;
-  if (shelly_rpc_get("Switch.Get?id=0", &on)) {
+  if (shelly_rpc_get(monitor_ip_, "Switch.Get?id=0", &on)) {
     if (!plug_ok_current_) {
-      ESP_LOGI(TAG, "Shelly plug online (%s)", plug_ip_.c_str());
+      ESP_LOGI(TAG, "Shelly plug online (%s)", monitor_ip_.c_str());
     }
     publish_plug_diagnostics(true, "ok");
     if (plug_switch_ != nullptr) {
@@ -276,9 +274,7 @@ void CyrusBleComponent::poll_plug(uint32_t now) {
   } else if (plug_ok_current_) {
     // Log reachability transitions only - a steady error every 10 s would
     // flood the log while the plug is simply unreachable.
-    ESP_LOGE(TAG, "Shelly plug unreachable at %s - check shelly_plug_ip in "
-                  "the cyrus_ble config",
-             plug_ip_.c_str());
+    ESP_LOGE(TAG, "Shelly plug unreachable at %s", monitor_ip_.c_str());
     publish_plug_diagnostics(false, "unreachable");
   }
 }

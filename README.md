@@ -32,18 +32,21 @@ the following native entities appear — no custom integration needed:
   survives reboots and rescales the volume slider to 0..limit. A live
   change sets **Cyrus Restart Required** — press **Cyrus Restart** to
   reboot the ESP32 so HA re-fetches the slider range
-- **Cyrus Amp Plug** — switch for the Shelly Plug S Gen3 powering the amp;
-  the ESP32 drives it directly over local Shelly RPC (HTTP, `/rpc`), IP set
-  via `shelly_plug_ip` in the `cyrus_ble:` config (validated as IPv4 at
-  build time). State is polled every 10 s, so the plug's own button or app
-  shows up in HA too. Local authentication must stay disabled on the plug
-  (RPC Digest auth is not implemented). The whole feature can be turned off
-  with `shelly_plug_enabled: false` — no IP needed, no diagnostics raised
+- **Cyrus Amp Plug** — switch driving the Shelly Plug S Gen3 over local
+  Shelly RPC (HTTP, `/rpc`) through the ESP32. The ESP32 is stateless: HA
+  owns the configuration — **Cyrus plug enabled** (`input_boolean`) and
+  **Cyrus plug IP** (`input_text`, IPv4 validated with the `ipaddr`
+  filter) — and passes the IP with every request. The plug feature can be
+  switched off entirely (no IP needed, no diagnostics; **Cyrus Amp** then
+  becomes unavailable). Local authentication must stay disabled on the plug
+  (RPC Digest auth is not implemented)
+- **Cyrus Plug State** (binary sensor) — raw plug state published by the
+  ESP32 from its 10 s `Switch.Get` polling (so the plug's own button/app
+  shows up in HA)
 - **Cyrus Plug OK** (binary) / **Cyrus Plug Diagnostic** (text:
-  `ok` / `disabled` / `not configured` / `unreachable`) — checked at boot
-  and on every poll; the HA **Cyrus Amp** switch is blocked while the plug
-  is unusable and the HA package raises a repair-style notification for
-  `not configured` / `unreachable`
+  `ok` / `unreachable` / `invalid ip`) — raw reachability as reported by
+  the ESP32; the HA package interprets it against its own configuration
+  and raises a repair-style notification for plug problems
 - **Cyrus Restart** — button; reboots the controller (used to apply a
   live volume-limit change)
 - **Cyrus Source** — dropdown (Cyrus ONE inputs by default; for ONE HD
@@ -74,15 +77,14 @@ home-assistant/
 ## Setup
 
 1. ESP32: copy `esphome/secrets.yaml.example` to `esphome/secrets.yaml`,
-   fill in Wi-Fi + API/OTA secrets, set `shelly_plug_ip` under `cyrus_ble:`
-   in `esphome/cyrus-remote.yaml` to your Shelly Plug S Gen3's LAN address,
-   then compile and flash `esphome/cyrus-remote.yaml`.
+   fill in Wi-Fi + API/OTA secrets, then compile and flash
+   `esphome/cyrus-remote.yaml`.
 2. Add the device to Home Assistant (Settings → Devices & Services →
    ESPHome) — all entities appear automatically.
-3. Home Assistant: include `home-assistant/cyrus_remote.yaml` as a package.
-   By default it drives the plug through the ESP32's
-   `switch.cyrus_remote_cyrus_amp_plug`; if you prefer your own plug
-   integration, point those entity ids at it instead.
+3. Home Assistant: include `home-assistant/cyrus_remote.yaml` as a package,
+   then configure the plug in the UI: turn on **Cyrus plug enabled** and
+   set **Cyrus plug IP** to your Shelly Plug S Gen3's LAN address (leave
+   disabled if you do not use a smart plug).
 4. Set the default startup volume on the **Cyrus startup volume** helper
    (0-90; 36 ≈ -40 dB).
 

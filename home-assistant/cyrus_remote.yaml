@@ -3,18 +3,17 @@
 # `esphome/` directory of this repository.
 #
 # The amplifier is powered through a Shelly Plug S Gen3 that the ESP32
-# switches directly over Shelly RPC (see the `shelly_plug_ip` substitution
-# in esphome/cyrus-remote.yaml). The HA-facing entity is
-# `switch.cyrus_remote_cyrus_amp_plug`. If you prefer your own plug
-# integration instead, point the `switch.amplifier_plug` entity ids below to
-# it - that is the only thing you would need to adjust.
+# switches directly over local Shelly RPC. The ESP32 is STATELESS about the
+# plug: it accepts the target IP with every request (cyrus_plug_set) and
+# reports raw results (Cyrus Plug OK / Cyrus Plug Diagnostic). All
+# configuration lives here, in HA:
 #
-# All day-to-day control entities (plug switch, volume slider, source
-# select, mute, ...) come from the ESPHome integration automatically once
-# the ESP32 is added to Home Assistant. This package only covers the
-# power-on flow:
+#   input_boolean.cyrus_plug_enabled - turn the whole plug feature on/off
+#     (off = no IP needed, no diagnostics, Cyrus Amp unavailable)
+#   input_text.cyrus_plug_ip - the Shelly's LAN address (validated IPv4)
 #
-#   plug switch on -> ESP32 switches the Shelly -> amp boots -> ESP32 scans
+# Power-on flow:
+#   Cyrus Amp on -> plug set on (RPC via ESP32) -> amp boots -> ESP32 scans
 #   for the amp (two-MAC boot sequence) -> connects -> writes the startup
 #   volume -> stays connected as the BLE relay ->
 #   `binary_sensor.<device>_cyrus_volume_set` pulses on success.
@@ -35,24 +34,80 @@ input_number:
     initial: 36
     icon: mdi:volume-high
 
-# Single switch to turn the amplifier on/off from the UI.
-# Power-off just cuts the plug; power-on runs the volume script below.
+# Plug feature configuration (owned by HA, applied to the stateless ESP32).
+input_boolean:
+  cyrus_plug_enabled:
+    name: "Cyrus plug enabled"
+    icon: mdi:power-socket-eu
+
+input_text:
+  cyrus_plug_ip:
+    name: "Cyrus plug IP"
+    icon: mdi:ip-network
+    # Client-side format hint; empty is allowed (plug disabled).
+    pattern: '^$|^(\d{1,3}\.){3}\d{1,3}$'
+
 template:
+  # UI switch driving the Shelly through the ESP32. Available only when the
+  # feature is enabled AND the configured IP is a valid IPv4 (the `ipaddr`
+  # template filter rejects anything else).
+  - switch:
+      - name: "Cyrus Amp Plug"
+        unique_id: cyrus_amp_plug_switch
+        state: "{{ is_state('binary_sensor.cyrus_remote_cyrus_plug_state', 'on') }}"
+        availability: >-
+          {{ is_state('input_boolean.cyrus_plug_enabled', 'on')
+             and (states('input_text.cyrus_plug_ip') | ipaddr) }}
+        turn_on:
+          - service: esphome.cyrus_remote_cyrus_plug_set
+            data:
+              ip: "{{ states('input_text.cyrus_plug_ip') }}"
+              on: true
+        turn_off:
+          - service: esphome.cyrus_remote_cyrus_plug_set
+            data:
+              ip: "{{ states('input_text.cyrus_plug_ip') }}"
+              on: false
+  # Single switch to turn the amplifier on/off from the UI.
+  # Power-off just cuts the plug; power-on runs the volume script below.
   - switch:
       - name: "Cyrus Amp"
         unique_id: cyrus_amp_power_switch
-        state: "{{ is_state('switch.cyrus_remote_cyrus_amp_plug', 'on') }}"
-        # Blocked while the plug feature is unusable: IP missing/invalid or
-        # plug unreachable (see binary_sensor...cyrus_plug_ok), or disabled.
-        availability: "{{ is_state('binary_sensor.cyrus_remote_cyrus_plug_ok', 'on') }}"
+        state: "{{ is_state('switch.cyrus_amp_plug', 'on') }}"
+        availability: "{{ states('switch.cyrus_amp_plug') not in ['unknown', 'unavailable'] }}"
         turn_on:
           - service: script.cyrus_amp_turn_on_with_volume
         turn_off:
           - service: switch.turn_off
             target:
-              entity_id: switch.cyrus_remote_cyrus_amp_plug
+              entity_id: switch.cyrus_amp_plug
 
 automation:
+  # Apply the plug configuration to the stateless ESP32: (re)start
+  # Switch.Get polling at the configured IP, or stop it when the feature is
+  # off / the IP is invalid. The time_pattern trigger re-applies the config
+  # after an ESP reboot (e.g. the volume-limit restart), which wipes the
+  # ESP-side monitoring state.
+  - alias: "Cyrus plug monitor apply"
+    id: cyrus_plug_monitor_apply
+    trigger:
+      - platform: homeassistant
+        event: start
+      - platform: state
+        entity_id: input_boolean.cyrus_plug_enabled
+      - platform: state
+        entity_id: input_text.cyrus_plug_ip
+      - platform: time_pattern
+        minutes: "/15"
+    action:
+      - service: esphome.cyrus_remote_cyrus_plug_monitor
+        data:
+          ip: >
+            {{ states('input_text.cyrus_plug_ip')
+               if is_state('input_boolean.cyrus_plug_enabled', 'on')
+                  and (states('input_text.cyrus_plug_ip') | ipaddr)
+               else '' }}
+
   # Covers the case where the plug is switched on outside of HA
   # (physical button on the plug, vendor app): the ESP32 polls the Shelly
   # state, so the entity below flips within ~10 s and the flow still runs.
@@ -60,7 +115,7 @@ automation:
     id: cyrus_amp_powered_on
     trigger:
       - platform: state
-        entity_id: switch.cyrus_remote_cyrus_amp_plug
+        entity_id: binary_sensor.cyrus_remote_cyrus_plug_state
         to: "on"
     condition:
       # The script itself turns the plug on; don't run twice.
@@ -69,30 +124,6 @@ automation:
         state: "off"
     action:
       - service: script.cyrus_amp_turn_on_with_volume
-
-script:
-  cyrus_amp_turn_on_with_volume:
-    alias: "Turn on Cyrus amp and set volume"
-    mode: single
-    sequence:
-      - service: switch.turn_on
-        target:
-          entity_id: switch.cyrus_remote_cyrus_amp_plug
-      # The ESP32 scans for the two MAC advertisements of the amplifier,
-      # connects over BLE, writes the volume and stays connected. It pulses
-      # binary_sensor.<device>_cyrus_volume_set when done
-      # (normally ~8 s after power-on; 30 s timeout as a safety net).
-      # NOTE: replace `cyrus_remote` with your ESPHome device name if you
-      # changed it in esphome/cyrus-remote.yaml.
-      - service: esphome.cyrus_remote_set_startup_volume
-        data:
-          volume: "{{ states('input_number.cyrus_startup_volume') | int }}"
-      - wait_for_trigger:
-          - platform: state
-            entity_id: binary_sensor.cyrus_remote_cyrus_volume_set
-            to: "on"
-        timeout: "30"
-        continue_on_timeout: true
 
   # The volume slider range is only announced to HA at connect time, so a
   # live volume-limit change flags binary_sensor...restart_required. Surface
@@ -113,37 +144,62 @@ script:
             to reboot the controller and apply the new volume slider range.
           notification_id: cyrus_restart_required
 
-  # Plug configuration problems reported by the ESP32: "not configured"
-  # (feature enabled but shelly_plug_ip missing/invalid) or "unreachable"
-  # (no Shelly answering at the configured IP). "disabled" is a deliberate
-  # opt-out and raises nothing.
-  - alias: "Cyrus plug configuration problem"
+  # Plug problems reported by the stateless ESP32: unreachable (no Shelly
+  # answering at the configured IP) or invalid ip. Only raised while the
+  # feature is enabled; the raw entity states stay visible for debugging
+  # when the plug is disabled.
+  - alias: "Cyrus plug problem"
     id: cyrus_plug_problem_notify
     trigger:
       - platform: state
         entity_id: sensor.cyrus_remote_cyrus_plug_diagnostic
+        to:
+          - "unreachable"
+          - "invalid ip"
     condition:
-      - condition: template
-        value_template: >-
-          {{ trigger.to_state.state in ['not configured', 'unreachable'] }}
+      - condition: state
+        entity_id: input_boolean.cyrus_plug_enabled
+        state: "on"
     action:
       - service: persistent_notification.create
         data:
-          title: "Cyrus: plug configuration problem"
+          title: "Cyrus: plug problem"
           message: >-
             Shelly plug: {{ trigger.to_state.state }}.
-            {{ 'Set shelly_plug_ip under cyrus_ble: in esphome/cyrus-remote.yaml (validated IPv4), or set shelly_plug_enabled: false if you do not use a smart plug.' if trigger.to_state.state == 'not configured' else 'Check that the Shelly Plug S Gen3 is powered, on the same LAN as the ESP32, and has local authentication disabled (Digest auth is not supported).' }}
+            {{ 'Check that the Shelly Plug S Gen3 is powered, on the same LAN as the ESP32, and has local authentication disabled (Digest auth is not supported).' if trigger.to_state.state == 'unreachable' else 'Fix the IP in input_text.cyrus_plug_ip - it must be a valid IPv4 address.' }}
           notification_id: cyrus_plug_problem
 
-  - alias: "Cyrus plug configuration OK"
+  - alias: "Cyrus plug problem cleared"
     id: cyrus_plug_problem_dismiss
     trigger:
       - platform: state
         entity_id: sensor.cyrus_remote_cyrus_plug_diagnostic
-        to:
-          - "ok"
-          - "disabled"
+        to: "ok"
     action:
       - service: persistent_notification.dismiss
         data:
           notification_id: cyrus_plug_problem
+
+script:
+  cyrus_amp_turn_on_with_volume:
+    alias: "Turn on Cyrus amp and set volume"
+    mode: single
+    sequence:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.cyrus_amp_plug
+      # The ESP32 scans for the two MAC advertisements of the amplifier,
+      # connects over BLE, writes the volume and stays connected. It pulses
+      # binary_sensor.<device>_cyrus_volume_set when done
+      # (normally ~8 s after power-on; 30 s timeout as a safety net).
+      # NOTE: replace `cyrus_remote` with your ESPHome device name if you
+      # changed it in esphome/cyrus-remote.yaml.
+      - service: esphome.cyrus_remote_set_startup_volume
+        data:
+          volume: "{{ states('input_number.cyrus_startup_volume') | int }}"
+      - wait_for_trigger:
+          - platform: state
+            entity_id: binary_sensor.cyrus_remote_cyrus_volume_set
+            to: "on"
+        timeout: "30"
+        continue_on_timeout: true

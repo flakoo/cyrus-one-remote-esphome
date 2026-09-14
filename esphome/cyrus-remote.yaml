@@ -44,6 +44,21 @@ api:
         - lambda: |-
             id(cyrus_ble_device)->request_volume(volume);
     # Control actions (require the amp link to be up).
+    - action: cyrus_plug_set
+      # Stateless plug control: HA passes the Shelly's IP with every call.
+      variables:
+        ip: string
+        "on": bool
+      then:
+        - lambda: |-
+            id(cyrus_ble_device)->set_plug(ip, on);
+    - action: cyrus_plug_monitor
+      # Start (ip non-empty) or stop (ip empty) polling Switch.Get at ip.
+      variables:
+        ip: string
+      then:
+        - lambda: |-
+            id(cyrus_ble_device)->monitor_plug(ip);
     - action: cyrus_set_volume
       variables:
         volume: int
@@ -135,8 +150,16 @@ binary_sensor:
     id: cyrus_restart_required
     name: "Cyrus Restart Required"
     device_class: problem
-  # Plug feature usable (IP configured and plug answering). The HA "Cyrus
-  # Amp" switch is available only while this is on.
+  # Raw plug state published by the stateless ESP32 from its Switch.Get
+  # polling (started/stopped by HA via cyrus_plug_monitor); read-only view,
+  # so the plug's own button/app shows up in HA.
+  - platform: template
+    id: cyrus_plug_state
+    name: "Cyrus Plug State"
+    device_class: power
+  # Raw plug reachability as reported by the stateless ESP32 (ok while its
+  # last RPC succeeded). The HA package interprets it together with its own
+  # config (plug enabled? valid IP?); not used directly for availability.
   - platform: template
     id: cyrus_plug_ok
     name: "Cyrus Plug OK"
@@ -202,16 +225,13 @@ cyrus_ble:
   mute_switch: cyrus_mute_switch
   av_direct_switch: cyrus_av_direct_switch
   restart_required_sensor: cyrus_restart_required
-  # Shelly Plug S Gen3 powering the amp: the component switches it over
-  # local Shelly RPC (HTTP, /rpc) and polls its state every 10 s. Set
-  # shelly_plug_ip to the plug's LAN address (validated as IPv4 at build
-  # time); local authentication must stay DISABLED on the plug (RPC uses
-  # Digest auth, which the ESP32 client does not implement). If you do not
-  # use a smart plug, set shelly_plug_enabled: false - no IP is needed and
-  # no diagnostics are raised.
-  shelly_plug_enabled: true
-  shelly_plug_ip: "192.168.68.50"
-  plug_switch: cyrus_plug_switch
+  # Stateless plug control (HA owns the configuration):
+  # - plug_switch: raw plug state, published by the component from its
+  #   Switch.Get polling (started/stopped by HA via cyrus_plug_monitor).
+  # - plug_ok_sensor / plug_diagnostic_sensor: reachability as reported by
+  #   the ESP (ok / unreachable / invalid ip); HA interprets them against
+  #   its own config (plug enabled? valid IP?).
+  plug_switch: cyrus_plug_state
   plug_ok_sensor: cyrus_plug_ok
   plug_diagnostic_sensor: cyrus_plug_diagnostic
   led: light_esp32_rmt_led_strip_1
@@ -288,20 +308,6 @@ select:
         id(cyrus_ble_device)->set_source(x);
 
 switch:
-  # Shelly plug switch - the cyrus_ble component drives it (Switch.Set via
-  # Shelly RPC) and publishes the polled state, so the plug's own button or
-  # vendor app shows up here too.
-  - platform: template
-    name: "Cyrus Amp Plug"
-    id: cyrus_plug_switch
-    icon: mdi:power-socket-eu
-    optimistic: false
-    turn_on_action:
-      lambda: |-
-        id(cyrus_ble_device)->set_plug(true);
-    turn_off_action:
-      lambda: |-
-        id(cyrus_ble_device)->set_plug(false);
   - platform: template
     name: "Cyrus Mute"
     id: cyrus_mute_switch
