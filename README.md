@@ -32,6 +32,11 @@ the following native entities appear — no custom integration needed:
   survives reboots and rescales the volume slider to 0..limit. A live
   change sets **Cyrus Restart Required** — press **Cyrus Restart** to
   reboot the ESP32 so HA re-fetches the slider range
+- **Cyrus Amp Plug** — switch for the Shelly Plug S Gen3 powering the amp;
+  the ESP32 drives it directly over Shelly RPC (HTTP, `/rpc`), IP set via
+  the `shelly_plug_ip` substitution. State is polled every 10 s, so the
+  plug's own button or app shows up in HA too. Local authentication must
+  stay disabled on the plug (ESPHome `http_request` has no Digest auth)
 - **Cyrus Restart** — button; reboots the controller (used to apply a
   live volume-limit change)
 - **Cyrus Source** — dropdown (Cyrus ONE inputs by default; for ONE HD
@@ -62,18 +67,22 @@ home-assistant/
 ## Setup
 
 1. ESP32: copy `esphome/secrets.yaml.example` to `esphome/secrets.yaml`,
-   fill in Wi-Fi + API/OTA secrets, compile and flash
-   `esphome/cyrus-remote.yaml`.
+   fill in Wi-Fi + API/OTA secrets, set the `shelly_plug_ip` substitution
+   in `esphome/cyrus-remote.yaml` to your Shelly Plug S Gen3's LAN address,
+   then compile and flash `esphome/cyrus-remote.yaml`.
 2. Add the device to Home Assistant (Settings → Devices & Services →
    ESPHome) — all entities appear automatically.
-3. Home Assistant: include `home-assistant/cyrus_remote.yaml` as a package
-   and replace `switch.amplifier_plug` with your smart plug entity.
+3. Home Assistant: include `home-assistant/cyrus_remote.yaml` as a package.
+   By default it drives the plug through the ESP32's
+   `switch.cyrus_remote_cyrus_amp_plug`; if you prefer your own plug
+   integration, point those entity ids at it instead.
 4. Set the default startup volume on the **Cyrus startup volume** helper
    (0-90; 36 ≈ -40 dB).
 
 ## How the power-on sequence works
 
-1. Smart plug turns on (from HA or physically).
+1. **Cyrus Amp Plug** turns on (HA, or the plug's own button/app — the
+   ESP32's 10 s polling surfaces that as a state change).
 2. HA calls `esphome.<device>_set_startup_volume`.
 3. The ESP32 scans for `ONE-*`, waits out the temporary boot MAC, connects
    to the stable MAC, writes the volume, subscribes to state notifications.
