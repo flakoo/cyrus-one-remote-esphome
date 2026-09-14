@@ -42,7 +42,9 @@ template:
       - name: "Cyrus Amp"
         unique_id: cyrus_amp_power_switch
         state: "{{ is_state('switch.cyrus_remote_cyrus_amp_plug', 'on') }}"
-        availability: "{{ states('switch.cyrus_remote_cyrus_amp_plug') not in ['unknown', 'unavailable'] }}"
+        # Blocked while the plug feature is unusable: IP missing/invalid or
+        # plug unreachable (see binary_sensor...cyrus_plug_ok), or disabled.
+        availability: "{{ is_state('binary_sensor.cyrus_remote_cyrus_plug_ok', 'on') }}"
         turn_on:
           - service: script.cyrus_amp_turn_on_with_volume
         turn_off:
@@ -110,3 +112,38 @@ script:
             The volume limit changed. Press button.cyrus_remote_cyrus_restart
             to reboot the controller and apply the new volume slider range.
           notification_id: cyrus_restart_required
+
+  # Plug configuration problems reported by the ESP32: "not configured"
+  # (feature enabled but shelly_plug_ip missing/invalid) or "unreachable"
+  # (no Shelly answering at the configured IP). "disabled" is a deliberate
+  # opt-out and raises nothing.
+  - alias: "Cyrus plug configuration problem"
+    id: cyrus_plug_problem_notify
+    trigger:
+      - platform: state
+        entity_id: sensor.cyrus_remote_cyrus_plug_diagnostic
+    condition:
+      - condition: template
+        value_template: >-
+          {{ trigger.to_state.state in ['not configured', 'unreachable'] }}
+    action:
+      - service: persistent_notification.create
+        data:
+          title: "Cyrus: plug configuration problem"
+          message: >-
+            Shelly plug: {{ trigger.to_state.state }}.
+            {{ 'Set shelly_plug_ip under cyrus_ble: in esphome/cyrus-remote.yaml (validated IPv4), or set shelly_plug_enabled: false if you do not use a smart plug.' if trigger.to_state.state == 'not configured' else 'Check that the Shelly Plug S Gen3 is powered, on the same LAN as the ESP32, and has local authentication disabled (Digest auth is not supported).' }}
+          notification_id: cyrus_plug_problem
+
+  - alias: "Cyrus plug configuration OK"
+    id: cyrus_plug_problem_dismiss
+    trigger:
+      - platform: state
+        entity_id: sensor.cyrus_remote_cyrus_plug_diagnostic
+        to:
+          - "ok"
+          - "disabled"
+    action:
+      - service: persistent_notification.dismiss
+        data:
+          notification_id: cyrus_plug_problem

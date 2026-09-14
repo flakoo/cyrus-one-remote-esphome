@@ -135,6 +135,12 @@ binary_sensor:
     id: cyrus_restart_required
     name: "Cyrus Restart Required"
     device_class: problem
+  # Plug feature usable (IP configured and plug answering). The HA "Cyrus
+  # Amp" switch is available only while this is on.
+  - platform: template
+    id: cyrus_plug_ok
+    name: "Cyrus Plug OK"
+    device_class: connectivity
 
 button:
   # Confirms a pending slider-range change: reboots the ESP32 so HA
@@ -157,6 +163,12 @@ sensor:
     name: "Cyrus Balance"
 
 text_sensor:
+  # Plug feature state: ok / disabled / not configured / unreachable. The
+  # HA package raises a repair-style notification for the latter two while
+  # the feature is enabled.
+  - platform: template
+    id: cyrus_plug_diagnostic
+    name: "Cyrus Plug Diagnostic"
   - platform: template
     id: cyrus_source
     name: "Cyrus Source"
@@ -191,12 +203,17 @@ cyrus_ble:
   av_direct_switch: cyrus_av_direct_switch
   restart_required_sensor: cyrus_restart_required
   # Shelly Plug S Gen3 powering the amp: the component switches it over
-  # local Shelly RPC (HTTP, /rpc) and polls its state every 10 s. Set to
-  # the plug's LAN address. Validated as IPv4 at build time; local
-  # authentication must stay DISABLED on the plug (RPC uses Digest auth,
-  # which the ESP32 client does not implement).
+  # local Shelly RPC (HTTP, /rpc) and polls its state every 10 s. Set
+  # shelly_plug_ip to the plug's LAN address (validated as IPv4 at build
+  # time); local authentication must stay DISABLED on the plug (RPC uses
+  # Digest auth, which the ESP32 client does not implement). If you do not
+  # use a smart plug, set shelly_plug_enabled: false - no IP is needed and
+  # no diagnostics are raised.
+  shelly_plug_enabled: true
   shelly_plug_ip: "192.168.68.50"
   plug_switch: cyrus_plug_switch
+  plug_ok_sensor: cyrus_plug_ok
+  plug_diagnostic_sensor: cyrus_plug_diagnostic
   led: light_esp32_rmt_led_strip_1
 
 # --- HA-facing controls ------------------------------------------------------

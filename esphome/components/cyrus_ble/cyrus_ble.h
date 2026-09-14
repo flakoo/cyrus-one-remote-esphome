@@ -97,9 +97,13 @@ class CyrusBleComponent : public esphome::Component,
 
   // Shelly Plug S Gen3 powering the amp (local RPC over HTTP; local auth
   // must be disabled on the plug). ip is validated at build time
-  // (ipv4address) and again at runtime.
+  // (ipv4address) and again at runtime. The whole feature can be turned off
+  // with set_plug_enabled(false) - no IP needed, no diagnostics raised.
   void set_plug_ip(const std::string &ip) { plug_ip_ = ip; }
+  void set_plug_enabled(bool enabled) { plug_enabled_ = enabled; }
   void set_plug_switch(esphome::switch_::Switch *s) { plug_switch_ = s; }
+  void set_plug_ok_sensor(esphome::binary_sensor::BinarySensor *s) { plug_ok_sensor_ = s; }
+  void set_plug_diagnostic_sensor(esphome::text_sensor::TextSensor *s) { plug_diagnostic_sensor_ = s; }
   void set_plug(bool on);
 
   // BleScannerListener (NimBLE host task)
@@ -157,6 +161,7 @@ class CyrusBleComponent : public esphome::Component,
   // Shelly plug RPC helpers.
   bool shelly_rpc_get(const char *method_params, bool *output);
   void poll_plug(uint32_t now);
+  void publish_plug_diagnostics(bool ok, const char *status);
 
   // Entity pointers (all optional)
   esphome::binary_sensor::BinarySensor *status_sensor_{nullptr};
@@ -174,12 +179,15 @@ class CyrusBleComponent : public esphome::Component,
   esphome::switch_::Switch *mute_switch_{nullptr};
   esphome::switch_::Switch *av_direct_switch_{nullptr};
   esphome::switch_::Switch *plug_switch_{nullptr};
+  esphome::binary_sensor::BinarySensor *plug_ok_sensor_{nullptr};
+  esphome::text_sensor::TextSensor *plug_diagnostic_sensor_{nullptr};
   esphome::binary_sensor::BinarySensor *restart_required_sensor_{nullptr};
 
   // Shelly plug state.
   std::string plug_ip_;
+  bool plug_enabled_{true};
   bool plug_ip_valid_{false};
-  bool plug_reachable_{true};
+  bool plug_ok_current_{false};
   uint32_t last_plug_poll_{0};
   esphome::text_sensor::TextSensor *model_sensor_{nullptr};
   esphome::text_sensor::TextSensor *sw_version_sensor_{nullptr};

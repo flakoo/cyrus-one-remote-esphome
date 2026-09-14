@@ -37,7 +37,13 @@ the following native entities appear — no custom integration needed:
   via `shelly_plug_ip` in the `cyrus_ble:` config (validated as IPv4 at
   build time). State is polled every 10 s, so the plug's own button or app
   shows up in HA too. Local authentication must stay disabled on the plug
-  (RPC Digest auth is not implemented)
+  (RPC Digest auth is not implemented). The whole feature can be turned off
+  with `shelly_plug_enabled: false` — no IP needed, no diagnostics raised
+- **Cyrus Plug OK** (binary) / **Cyrus Plug Diagnostic** (text:
+  `ok` / `disabled` / `not configured` / `unreachable`) — checked at boot
+  and on every poll; the HA **Cyrus Amp** switch is blocked while the plug
+  is unusable and the HA package raises a repair-style notification for
+  `not configured` / `unreachable`
 - **Cyrus Restart** — button; reboots the controller (used to apply a
   live volume-limit change)
 - **Cyrus Source** — dropdown (Cyrus ONE inputs by default; for ONE HD

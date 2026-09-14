@@ -29,7 +29,10 @@ CONF_MUTE_SWITCH = "mute_switch"
 CONF_AV_DIRECT_SWITCH = "av_direct_switch"
 CONF_RESTART_REQUIRED_SENSOR = "restart_required_sensor"
 CONF_SHELLY_PLUG_IP = "shelly_plug_ip"
+CONF_SHELLY_PLUG_ENABLED = "shelly_plug_enabled"
 CONF_PLUG_SWITCH = "plug_switch"
+CONF_PLUG_OK_SENSOR = "plug_ok_sensor"
+CONF_PLUG_DIAGNOSTIC_SENSOR = "plug_diagnostic_sensor"
 
 _BINARY_SENSORS = {
     CONF_STATUS_SENSOR: "set_status_sensor",
@@ -65,7 +68,10 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_MUTE_SWITCH): cv.use_id(switch.Switch),
     cv.Optional(CONF_AV_DIRECT_SWITCH): cv.use_id(switch.Switch),
     cv.Optional(CONF_SHELLY_PLUG_IP): cv.ipv4address,
+    cv.Optional(CONF_SHELLY_PLUG_ENABLED, default=True): cv.boolean,
     cv.Optional(CONF_PLUG_SWITCH): cv.use_id(switch.Switch),
+    cv.Optional(CONF_PLUG_OK_SENSOR): cv.use_id(binary_sensor.BinarySensor),
+    cv.Optional(CONF_PLUG_DIAGNOSTIC_SENSOR): cv.use_id(text_sensor.TextSensor),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -105,6 +111,13 @@ async def to_code(config):
 
     if CONF_SHELLY_PLUG_IP in config:
         cg.add(var.set_plug_ip(str(config[CONF_SHELLY_PLUG_IP])))
+    cg.add(var.set_plug_enabled(config[CONF_SHELLY_PLUG_ENABLED]))
     if CONF_PLUG_SWITCH in config:
         sw = await cg.get_variable(config[CONF_PLUG_SWITCH])
         cg.add(var.set_plug_switch(sw))
+    if CONF_PLUG_OK_SENSOR in config:
+        sens = await cg.get_variable(config[CONF_PLUG_OK_SENSOR])
+        cg.add(var.set_plug_ok_sensor(sens))
+    if CONF_PLUG_DIAGNOSTIC_SENSOR in config:
+        sens = await cg.get_variable(config[CONF_PLUG_DIAGNOSTIC_SENSOR])
+        cg.add(var.set_plug_diagnostic_sensor(sens))
