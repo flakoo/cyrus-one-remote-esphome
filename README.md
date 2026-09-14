@@ -33,10 +33,11 @@ the following native entities appear — no custom integration needed:
   change sets **Cyrus Restart Required** — press **Cyrus Restart** to
   reboot the ESP32 so HA re-fetches the slider range
 - **Cyrus Amp Plug** — switch for the Shelly Plug S Gen3 powering the amp;
-  the ESP32 drives it directly over Shelly RPC (HTTP, `/rpc`), IP set via
-  the `shelly_plug_ip` substitution. State is polled every 10 s, so the
-  plug's own button or app shows up in HA too. Local authentication must
-  stay disabled on the plug (ESPHome `http_request` has no Digest auth)
+  the ESP32 drives it directly over local Shelly RPC (HTTP, `/rpc`), IP set
+  via `shelly_plug_ip` in the `cyrus_ble:` config (validated as IPv4 at
+  build time). State is polled every 10 s, so the plug's own button or app
+  shows up in HA too. Local authentication must stay disabled on the plug
+  (RPC Digest auth is not implemented)
 - **Cyrus Restart** — button; reboots the controller (used to apply a
   live volume-limit change)
 - **Cyrus Source** — dropdown (Cyrus ONE inputs by default; for ONE HD
@@ -67,7 +68,7 @@ home-assistant/
 ## Setup
 
 1. ESP32: copy `esphome/secrets.yaml.example` to `esphome/secrets.yaml`,
-   fill in Wi-Fi + API/OTA secrets, set the `shelly_plug_ip` substitution
+   fill in Wi-Fi + API/OTA secrets, set `shelly_plug_ip` under `cyrus_ble:`
    in `esphome/cyrus-remote.yaml` to your Shelly Plug S Gen3's LAN address,
    then compile and flash `esphome/cyrus-remote.yaml`.
 2. Add the device to Home Assistant (Settings → Devices & Services →

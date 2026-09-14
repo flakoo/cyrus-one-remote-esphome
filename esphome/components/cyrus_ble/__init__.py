@@ -28,6 +28,8 @@ CONF_SOURCE_SELECT = "source_select"
 CONF_MUTE_SWITCH = "mute_switch"
 CONF_AV_DIRECT_SWITCH = "av_direct_switch"
 CONF_RESTART_REQUIRED_SENSOR = "restart_required_sensor"
+CONF_SHELLY_PLUG_IP = "shelly_plug_ip"
+CONF_PLUG_SWITCH = "plug_switch"
 
 _BINARY_SENSORS = {
     CONF_STATUS_SENSOR: "set_status_sensor",
@@ -62,6 +64,8 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_SOURCE_SELECT): cv.use_id(select.Select),
     cv.Optional(CONF_MUTE_SWITCH): cv.use_id(switch.Switch),
     cv.Optional(CONF_AV_DIRECT_SWITCH): cv.use_id(switch.Switch),
+    cv.Optional(CONF_SHELLY_PLUG_IP): cv.ipv4address,
+    cv.Optional(CONF_PLUG_SWITCH): cv.use_id(switch.Switch),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -98,3 +102,9 @@ async def to_code(config):
         if key in config:
             ent = await cg.get_variable(config[key])
             cg.add(getattr(var, setter)(ent))
+
+    if CONF_SHELLY_PLUG_IP in config:
+        cg.add(var.set_plug_ip(str(config[CONF_SHELLY_PLUG_IP])))
+    if CONF_PLUG_SWITCH in config:
+        sw = await cg.get_variable(config[CONF_PLUG_SWITCH])
+        cg.add(var.set_plug_switch(sw))

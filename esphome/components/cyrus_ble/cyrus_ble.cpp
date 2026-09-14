@@ -5,6 +5,9 @@
 #include "esphome/core/log.h"
 #include "esphome/components/api/api_server.h"
 
+#include "esp_http_client.h"
+#include "lwip/ip4_addr.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -34,6 +37,21 @@ void CyrusBleComponent::on_ha_connected() {
 
 void CyrusBleComponent::setup() {
   ESP_LOGI(TAG, "Initializing native NimBLE");
+
+  // Runtime IP check on top of the build-time ipv4address validation:
+  // ip4addr_aton returns 0 for malformed addresses and for 0.0.0.0.
+  if (!plug_ip_.empty()) {
+    ip4_addr_t parsed{};
+    plug_ip_valid_ = (ip4addr_aton(plug_ip_.c_str(), &parsed) != 0);
+    if (!plug_ip_valid_) {
+      ESP_LOGE(TAG, "shelly_plug_ip '%s' is not a usable IPv4 address - "
+                    "plug control disabled",
+               plug_ip_.c_str());
+    } else {
+      ESP_LOGI(TAG, "Shelly plug at %s (RPC over HTTP, polled every %u s)",
+               plug_ip_.c_str(), PLUG_POLL_INTERVAL_MS / 1000);
+    }
+  }
 
   notification_queue_ = xQueueCreate(8, sizeof(BleNotification));
   if (notification_queue_ == nullptr) {
@@ -157,6 +175,85 @@ void CyrusBleComponent::brightness_down() {
 }
 
 // ------------------------------------------------------------------
+// Shelly Plug S Gen3 (local RPC over HTTP)
+// ------------------------------------------------------------------
+
+bool CyrusBleComponent::shelly_rpc_get(const char *method_params, bool *output) {
+  char url[96];
+  snprintf(url, sizeof(url), "http://%s/rpc/%s", plug_ip_.c_str(), method_params);
+
+  esp_http_client_config_t cfg{};
+  cfg.url = url;
+  cfg.timeout_ms = PLUG_HTTP_TIMEOUT_MS;
+
+  esp_http_client_handle_t client = esp_http_client_init(&cfg);
+  const esp_err_t err = esp_http_client_perform(client);
+  bool ok = false;
+  if (err == ESP_OK && esp_http_client_get_status_code(client) == 200) {
+    char buf[512];
+    int total = 0;
+    int r;
+    while (total < (int) sizeof(buf) - 1 &&
+           (r = esp_http_client_read(client, buf + total, sizeof(buf) - 1 - total)) > 0) {
+      total += r;
+    }
+    buf[total] = '\0';
+    if (output != nullptr) {
+      *output = strstr(buf, "\"output\":true") != nullptr;
+    }
+    ok = true;
+  } else {
+    ESP_LOGD(TAG, "Shelly RPC %s failed: %s (status %d)", method_params,
+             esp_err_to_name(err), esp_http_client_get_status_code(client));
+  }
+  esp_http_client_cleanup(client);
+  return ok;
+}
+
+void CyrusBleComponent::set_plug(bool on) {
+  if (!plug_ip_valid_) {
+    ESP_LOGE(TAG, "Shelly plug IP not configured/invalid; cannot %s the plug",
+             on ? "power on" : "power off");
+    return;
+  }
+  char params[48];
+  snprintf(params, sizeof(params), "Switch.Set?id=0&on=%s", on ? "true" : "false");
+  bool output = false;
+  if (shelly_rpc_get(params, &output)) {
+    if (plug_switch_ != nullptr) {
+      plug_switch_->publish_state(output);
+    }
+  } else {
+    ESP_LOGW(TAG, "Shelly Switch.Set failed (%s unreachable at %s)",
+             on ? "on" : "off", plug_ip_.c_str());
+  }
+}
+
+void CyrusBleComponent::poll_plug(uint32_t now) {
+  if (!plug_ip_valid_ || plug_switch_ == nullptr ||
+      now - last_plug_poll_ < PLUG_POLL_INTERVAL_MS) {
+    return;
+  }
+  last_plug_poll_ = now;
+
+  bool on = false;
+  if (shelly_rpc_get("Switch.Get?id=0", &on)) {
+    if (!plug_reachable_) {
+      ESP_LOGI(TAG, "Shelly plug back online (%s)", plug_ip_.c_str());
+      plug_reachable_ = true;
+    }
+    plug_switch_->publish_state(on);
+  } else if (plug_reachable_) {
+    // Log reachability transitions only - a steady error every 10 s would
+    // flood the log while the plug is simply unreachable.
+    ESP_LOGE(TAG, "Shelly plug unreachable at %s - check shelly_plug_ip in "
+                  "the cyrus_ble config",
+             plug_ip_.c_str());
+    plug_reachable_ = false;
+  }
+}
+
+// ------------------------------------------------------------------
 // Main loop
 // ------------------------------------------------------------------
 
@@ -169,6 +266,8 @@ void CyrusBleComponent::loop() {
   led_indicator_.loop();
 
   const uint32_t now = esphome::millis();
+
+  poll_plug(now);
 
   // Legacy status pulse (500 ms) for the HA power-on automation.
   if (state_ == State::PULSE && now - pulse_start_ >= 500) {

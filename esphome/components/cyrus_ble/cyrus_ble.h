@@ -95,6 +95,13 @@ class CyrusBleComponent : public esphome::Component,
   void brightness_up();
   void brightness_down();
 
+  // Shelly Plug S Gen3 powering the amp (local RPC over HTTP; local auth
+  // must be disabled on the plug). ip is validated at build time
+  // (ipv4address) and again at runtime.
+  void set_plug_ip(const std::string &ip) { plug_ip_ = ip; }
+  void set_plug_switch(esphome::switch_::Switch *s) { plug_switch_ = s; }
+  void set_plug(bool on);
+
   // BleScannerListener (NimBLE host task)
   void on_first_mac(const ble_addr_t &addr) override;
   void on_second_mac(const ble_addr_t &addr) override;
@@ -120,6 +127,8 @@ class CyrusBleComponent : public esphome::Component,
   static constexpr uint32_t SCAN_TIMEOUT_MS = 15000;
   static constexpr uint32_t MAC_A_TO_B_TIMEOUT_MS = 4500;
   static constexpr uint32_t COMMAND_SPACING_MS = 200;
+  static constexpr uint32_t PLUG_POLL_INTERVAL_MS = 10000;
+  static constexpr int PLUG_HTTP_TIMEOUT_MS = 2000;
   // After a source change command the amp echoes notifications that may still
   // carry the old source; ignore mismatched updates for this long.
   static constexpr uint32_t SOURCE_QUIET_WINDOW_MS = 1500;
@@ -145,6 +154,10 @@ class CyrusBleComponent : public esphome::Component,
   void publish_status(bool ok);
   void set_link_state(bool connected, bool ready);
 
+  // Shelly plug RPC helpers.
+  bool shelly_rpc_get(const char *method_params, bool *output);
+  void poll_plug(uint32_t now);
+
   // Entity pointers (all optional)
   esphome::binary_sensor::BinarySensor *status_sensor_{nullptr};
   esphome::binary_sensor::BinarySensor *connected_sensor_{nullptr};
@@ -160,7 +173,14 @@ class CyrusBleComponent : public esphome::Component,
   esphome::select::Select *source_select_{nullptr};
   esphome::switch_::Switch *mute_switch_{nullptr};
   esphome::switch_::Switch *av_direct_switch_{nullptr};
+  esphome::switch_::Switch *plug_switch_{nullptr};
   esphome::binary_sensor::BinarySensor *restart_required_sensor_{nullptr};
+
+  // Shelly plug state.
+  std::string plug_ip_;
+  bool plug_ip_valid_{false};
+  bool plug_reachable_{true};
+  uint32_t last_plug_poll_{0};
   esphome::text_sensor::TextSensor *model_sensor_{nullptr};
   esphome::text_sensor::TextSensor *sw_version_sensor_{nullptr};
   esphome::text_sensor::TextSensor *serial_sensor_{nullptr};
