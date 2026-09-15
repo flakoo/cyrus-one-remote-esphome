@@ -37,22 +37,24 @@ api:
     key: !secret api_key
   actions:
     # Power-on path: scan, connect, write startup volume (0-90), stay connected.
-    - action: cyrus_remote_set_startup_volume
+    - action: set_startup_volume
       variables:
         volume: int
       then:
         - lambda: |-
             id(cyrus_ble_device)->request_volume(volume);
     # Control actions (require the amp link to be up).
-    - action: cyrus_remote_cyrus_plug_set
+    - action: cyrus_plug_set
       # Stateless plug control: HA passes the Shelly's IP with every call.
+      # NOTE: HA prefixes user services with the device name, so this is
+      # exposed as esphome.cyrus_remote_cyrus_plug_set.
       variables:
         ip: string
         "on": bool
       then:
         - lambda: |-
             id(cyrus_ble_device)->set_plug(ip, on);
-    - action: cyrus_remote_cyrus_plug_monitor
+    - action: cyrus_plug_monitor
       # Start (ip non-empty) or stop (ip empty) polling Switch.Get at ip.
       variables:
         ip: string
