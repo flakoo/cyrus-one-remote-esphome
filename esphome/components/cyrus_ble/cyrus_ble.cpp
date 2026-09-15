@@ -168,36 +168,50 @@ void CyrusBleComponent::brightness_down() {
 // Shelly Plug S Gen3 (local RPC over HTTP)
 // ------------------------------------------------------------------
 
+// Response body accumulator for shelly_rpc_get(): the event handler fires
+// during esp_http_client_perform(); reading the body afterwards returns
+// nothing (the client already consumed it).
+static char shelly_body_[640];
+static size_t shelly_body_len_;
+
+static esp_err_t shelly_http_event_handler(esp_http_client_event_t *evt) {
+  if (evt->event_id == HTTP_EVENT_ON_DATA && evt->data != nullptr && evt->data_len > 0) {
+    const size_t room = sizeof(shelly_body_) - 1 - shelly_body_len_;
+    const size_t copy = evt->data_len < room ? evt->data_len : room;
+    memcpy(shelly_body_ + shelly_body_len_, evt->data, copy);
+    shelly_body_len_ += copy;
+  }
+  return ESP_OK;
+}
+
 bool CyrusBleComponent::shelly_rpc_get(const std::string &ip, const char *method_params,
                                        bool *output, int *http_status) {
   char url[96];
   snprintf(url, sizeof(url), "http://%s/rpc/%s", ip.c_str(), method_params);
 
+  shelly_body_len_ = 0;
+  shelly_body_[0] = '\0';
+
   esp_http_client_config_t cfg{};
   cfg.url = url;
   cfg.timeout_ms = PLUG_HTTP_TIMEOUT_MS;
+  cfg.event_handler = shelly_http_event_handler;
 
   esp_http_client_handle_t client = esp_http_client_init(&cfg);
   const esp_err_t err = esp_http_client_perform(client);
-  bool ok = false;
   const int status = esp_http_client_get_status_code(client);
   if (http_status != nullptr) {
     *http_status = status;
   }
-  const int content_len = esp_http_client_get_content_length(client);
-  if (err == ESP_OK && status == 200 && content_len > 0) {
-    char buf[640];
-    const int total = esp_http_client_read_response(client, buf, sizeof(buf) - 1);
-    if (total > 0) {
-      buf[total] = '\0';
-      if (output != nullptr) {
-        *output = strstr(buf, "\"output\":true") != nullptr;
-      }
-      ok = true;
+  const bool ok = (err == ESP_OK && status == 200 && shelly_body_len_ > 0);
+  if (ok) {
+    shelly_body_[shelly_body_len_] = '\0';
+    if (output != nullptr) {
+      *output = strstr(shelly_body_, "\"output\":true") != nullptr;
     }
   } else {
-    ESP_LOGD(TAG, "Shelly RPC %s failed: %s (status %d)", method_params,
-             esp_err_to_name(err), status);
+    ESP_LOGD(TAG, "Shelly RPC %s failed: %s (status %d, body %u bytes)", method_params,
+             esp_err_to_name(err), status, (unsigned) shelly_body_len_);
   }
   esp_http_client_cleanup(client);
   return ok;
