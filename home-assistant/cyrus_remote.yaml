@@ -39,13 +39,11 @@ input_boolean:
   cyrus_plug_enabled:
     name: "Cyrus plug enabled"
     icon: mdi:power-socket-eu
-    unique_id: cyrus_plug_enabled
 
 input_text:
   cyrus_plug_ip:
     name: "Cyrus plug IP"
     icon: mdi:ip-network
-    unique_id: cyrus_plug_ip
     # Client-side format hint; empty is allowed (plug disabled).
     pattern: '^$|^(\d{1,3}\.){3}\d{1,3}$'
 
@@ -59,7 +57,7 @@ template:
         state: "{{ is_state('binary_sensor.cyrus_remote_cyrus_plug_state', 'on') }}"
         availability: >-
           {{ is_state('input_boolean.cyrus_plug_enabled', 'on')
-             and (states('input_text.cyrus_plug_ip') | ipaddr) }}
+             and (states('input_text.cyrus_plug_ip') | regex_match('^(\\d{1,3}\\.){3}\\d{1,3}$')) }}
         turn_on:
           - service: esphome.cyrus_remote_cyrus_plug_set
             data:
@@ -102,7 +100,7 @@ automation:
           ip: >
             {{ states('input_text.cyrus_plug_ip')
                if is_state('input_boolean.cyrus_plug_enabled', 'on')
-                  and (states('input_text.cyrus_plug_ip') | ipaddr)
+                  and (states('input_text.cyrus_plug_ip') | regex_match('^(\\d{1,3}\\.){3}\\d{1,3}$'))
                else '' }}
 
   # Covers the case where the plug is switched on outside of HA
