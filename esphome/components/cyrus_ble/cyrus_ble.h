@@ -160,7 +160,8 @@ class CyrusBleComponent : public esphome::Component,
   void set_link_state(bool connected, bool ready);
 
   // Shelly plug RPC helpers.
-  bool shelly_rpc_get(const std::string &ip, const char *method_params, bool *output);
+  bool shelly_rpc_get(const std::string &ip, const char *method_params, bool *output,
+                      int *http_status = nullptr);
   void poll_plug(uint32_t now);
   void publish_plug_diagnostics(bool ok, const char *status);
 
@@ -189,6 +190,10 @@ class CyrusBleComponent : public esphome::Component,
   bool monitor_active_{false};
   bool plug_ok_current_{false};
   uint32_t last_plug_poll_{0};
+  // Shelly firmware 2.0 renamed Switch.Get to Switch.GetStatus; older
+  // firmware only has Switch.Get. Resolved on the first successful poll.
+  enum class PlugGetMethod { UNKNOWN, GET_STATUS, GET } plug_get_method_{
+      PlugGetMethod::UNKNOWN};
   esphome::text_sensor::TextSensor *model_sensor_{nullptr};
   esphome::text_sensor::TextSensor *sw_version_sensor_{nullptr};
   esphome::text_sensor::TextSensor *serial_sensor_{nullptr};

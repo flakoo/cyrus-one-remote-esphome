@@ -169,7 +169,7 @@ void CyrusBleComponent::brightness_down() {
 // ------------------------------------------------------------------
 
 bool CyrusBleComponent::shelly_rpc_get(const std::string &ip, const char *method_params,
-                                       bool *output) {
+                                       bool *output, int *http_status) {
   char url[96];
   snprintf(url, sizeof(url), "http://%s/rpc/%s", ip.c_str(), method_params);
 
@@ -180,7 +180,11 @@ bool CyrusBleComponent::shelly_rpc_get(const std::string &ip, const char *method
   esp_http_client_handle_t client = esp_http_client_init(&cfg);
   const esp_err_t err = esp_http_client_perform(client);
   bool ok = false;
-  if (err == ESP_OK && esp_http_client_get_status_code(client) == 200) {
+  const int status = esp_http_client_get_status_code(client);
+  if (http_status != nullptr) {
+    *http_status = status;
+  }
+  if (err == ESP_OK && status == 200) {
     char buf[512];
     int total = 0;
     int r;
@@ -262,8 +266,22 @@ void CyrusBleComponent::poll_plug(uint32_t now) {
   }
   last_plug_poll_ = now;
 
+  const char *method = plug_get_method_ == PlugGetMethod::GET
+                           ? "Switch.Get?id=0"
+                           : "Switch.GetStatus?id=0";  // fw >= 2.0
+  int http_status = 0;
   bool on = false;
-  if (shelly_rpc_get(monitor_ip_, "Switch.Get?id=0", &on)) {
+  bool ok = shelly_rpc_get(monitor_ip_, method, &on, &http_status);
+  if (!ok && plug_get_method_ == PlugGetMethod::UNKNOWN && http_status == 404) {
+    // Older firmware (< 2.0) only has Switch.Get.
+    ok = shelly_rpc_get(monitor_ip_, "Switch.Get?id=0", &on, &http_status);
+    if (ok) {
+      plug_get_method_ = PlugGetMethod::GET;
+    }
+  } else if (ok && plug_get_method_ == PlugGetMethod::UNKNOWN) {
+    plug_get_method_ = PlugGetMethod::GET_STATUS;
+  }
+  if (ok) {
     if (!plug_ok_current_) {
       ESP_LOGI(TAG, "Shelly plug online (%s)", monitor_ip_.c_str());
     }
