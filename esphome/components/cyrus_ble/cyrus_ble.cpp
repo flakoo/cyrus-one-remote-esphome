@@ -184,22 +184,20 @@ bool CyrusBleComponent::shelly_rpc_get(const std::string &ip, const char *method
   if (http_status != nullptr) {
     *http_status = status;
   }
-  if (err == ESP_OK && status == 200) {
-    char buf[512];
-    int total = 0;
-    int r;
-    while (total < (int) sizeof(buf) - 1 &&
-           (r = esp_http_client_read(client, buf + total, sizeof(buf) - 1 - total)) > 0) {
-      total += r;
+  const int content_len = esp_http_client_get_content_length(client);
+  if (err == ESP_OK && status == 200 && content_len > 0) {
+    char buf[640];
+    const int total = esp_http_client_read_response(client, buf, sizeof(buf) - 1);
+    if (total > 0) {
+      buf[total] = '\0';
+      if (output != nullptr) {
+        *output = strstr(buf, "\"output\":true") != nullptr;
+      }
+      ok = true;
     }
-    buf[total] = '\0';
-    if (output != nullptr) {
-      *output = strstr(buf, "\"output\":true") != nullptr;
-    }
-    ok = true;
   } else {
     ESP_LOGD(TAG, "Shelly RPC %s failed: %s (status %d)", method_params,
-             esp_err_to_name(err), esp_http_client_get_status_code(client));
+             esp_err_to_name(err), status);
   }
   esp_http_client_cleanup(client);
   return ok;
@@ -246,10 +244,11 @@ void CyrusBleComponent::set_plug(const std::string &ip, bool on) {
   }
   char params[48];
   snprintf(params, sizeof(params), "Switch.Set?id=0&on=%s", on ? "true" : "false");
-  bool output = false;
-  if (shelly_rpc_get(ip, params, &output)) {
+  // Switch.Set answers {"was_on":...} (the state BEFORE the command), so
+  // publish the commanded value on success.
+  if (shelly_rpc_get(ip, params, nullptr)) {
     if (plug_switch_ != nullptr) {
-      plug_switch_->publish_state(output);
+      plug_switch_->publish_state(on);
     }
     publish_plug_diagnostics(true, "ok");
   } else {
