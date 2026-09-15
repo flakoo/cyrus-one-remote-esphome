@@ -62,12 +62,14 @@ template:
           - service: esphome.cyrus_remote_cyrus_plug_set
             data:
               ip: "{{ states('input_text.cyrus_plug_ip') }}"
-              on: true
+              # Quoted: 'on' is a YAML 1.1 boolean key and would be parsed
+              # as True, failing the service schema validation.
+              "on": true
         turn_off:
           - service: esphome.cyrus_remote_cyrus_plug_set
             data:
               ip: "{{ states('input_text.cyrus_plug_ip') }}"
-              on: false
+              "on": false
   # NOTE: this package intentionally does NOT define the user-facing
   # "Cyrus Amp" switch - you wire your own (existing) switch/script to
   # `switch.cyrus_amp_plug` so the power-on flow (plug on -> BLE connect ->
