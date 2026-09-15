@@ -175,6 +175,10 @@ automation:
         data:
           notification_id: cyrus_plug_problem
 
+# Power-on script used by the "Cyrus amp powered on" automation below.
+# Fresh installs can use it as-is; if you already have your own power-on
+# script (e.g. one that also handles a startup lock or other devices),
+# delete this block and point the automation's condition/action at yours.
 script:
   cyrus_amp_turn_on_with_volume:
     alias: "Turn on Cyrus amp and set volume"
